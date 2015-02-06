@@ -350,10 +350,15 @@ func (container *Container) isNetworkAllocated() bool {
 	return container.NetworkSettings.IPAddress != ""
 }
 
+
 // cleanup releases any network resources allocated to the container along with any rules
 // around how containers are linked together.  It also unmounts the container's root filesystem.
 func (container *Container) cleanup() {
-	container.ReleaseNetwork()
+	if container.IsCheckpointed() {
+		log.CRDbg("not calling ReleaseNetwork() for checkpointed container %s", container.ID)
+	} else {
+		container.ReleaseNetwork()
+	}
 
 	disableAllActiveLinks(container)
 
@@ -694,6 +699,41 @@ func (container *Container) Copy(resource string) (io.ReadCloser, error) {
 	return reader, nil
 }
 
+func (container *Container) Checkpoint() error {
+	return container.daemon.Checkpoint(container)
+}
+
+func (container *Container) Restore() error {
+	var err error
+
+	container.Lock()
+	defer container.Unlock()
+
+	defer func() {
+		if err != nil {
+			container.cleanup()
+		}
+	}()
+
+	if err = container.initializeNetworking(); err != nil {
+		return err
+	}
+
+	linkedEnv, err := container.setupLinkedContainers()
+	if err != nil {
+		return err
+	}
+	if err = container.setupWorkingDirectory(); err != nil {
+		return err
+	}
+	env := container.createDaemonEnvironment(linkedEnv)
+	if err = populateCommandRestore(container, env); err != nil {
+		return err
+	}
+
+	return container.waitForRestore()
+}
+
 // Returns true if the container exposes a certain port
 func (container *Container) Exposes(p nat.Port) bool {
 	_, exists := container.Config.ExposedPorts[p]
@@ -785,6 +825,29 @@ func (container *Container) waitForStart() error {
 	select {
 	case <-container.monitor.startSignal:
 	case err := <-promise.Go(container.monitor.Start):
+		return err
+	}
+
+	return nil
+}
+
+// Like waitForStart() but for restoring a container.
+//
+// XXX Does RestartPolicy apply here?
+func (container *Container) waitForRestore() error {
+	container.monitor = newContainerMonitor(container, container.hostConfig.RestartPolicy)
+
+	// After calling promise.Go() we'll have two goroutines:
+	// - The current goroutine that will block in the select
+	//   below until restore is done.
+	// - A new goroutine that will restore the container and
+	//   wait for it to exit.
+	select {
+	case <-container.monitor.restoreSignal:
+		if container.ExitCode != 0 {
+			return fmt.Errorf("restore process failed")
+		}
+	case err := <-promise.Go(container.monitor.Restore):
 		return err
 	}
 
@@ -1002,7 +1065,6 @@ func attach(streamConfig *StreamConfig, openStdin, stdinOnce, tty bool, stdin io
 			_, err = copyEscapable(cStdin, stdin)
 		} else {
 			_, err = io.Copy(cStdin, stdin)
-
 		}
 		if err == io.ErrClosedPipe {
 			err = nil
