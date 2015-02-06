@@ -322,6 +322,53 @@ func mergeDevices(defaultDevices, userDevices []*configs.Device) []*configs.Devi
 	return append(devs, userDevices...)
 }
 
+// Like populateCommand() but for restoring a container.
+//
+// XXX populateCommand() does a lot more.  Not sure if we have
+//     to do everything it does.
+func populateCommandRestore(c *Container, env []string) error {
+	resources := &execdriver.Resources{
+		Memory:     c.Config.Memory,
+		MemorySwap: c.Config.MemorySwap,
+		CpuShares:  c.Config.CpuShares,
+		Cpuset:     c.Config.Cpuset,
+	}
+
+	processConfig := execdriver.ProcessConfig{
+		Privileged: c.hostConfig.Privileged,
+		Entrypoint: c.Path,
+		Arguments:  c.Args,
+		Tty:        c.Config.Tty,
+		User:       c.Config.User,
+	}
+
+	processConfig.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	processConfig.Env = env
+
+	c.command = &execdriver.Command{
+		ID:             c.ID,
+		Rootfs:         c.RootfsPath(),
+		ReadonlyRootfs: c.hostConfig.ReadonlyRootfs,
+		InitPath:       "/.dockerinit",
+		WorkingDir:     c.Config.WorkingDir,
+		// Network:     en,
+		// Ipc:         ipc,
+		// Pid:         pid,
+		Resources: resources,
+		// AllowedDevices: allowedDevices,
+		// AutoCreatedDevices: autoCreatedDevices,
+		CapAdd:        c.hostConfig.CapAdd,
+		CapDrop:       c.hostConfig.CapDrop,
+		ProcessConfig: processConfig,
+		ProcessLabel:  c.GetProcessLabel(),
+		MountLabel:    c.GetMountLabel(),
+		// LxcConfig:  lxcConfig,
+		AppArmorProfile: c.AppArmorProfile,
+	}
+
+	return nil
+}
+
 // GetSize, return real size, virtual size
 func (container *Container) GetSize() (int64, int64) {
 	var (
