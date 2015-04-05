@@ -8,9 +8,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"syscall"
 
 	"github.com/docker/libcontainer/cgroups"
+	"github.com/docker/libcontainer/configs"
 	"github.com/docker/libcontainer/system"
 )
 
@@ -158,6 +161,12 @@ func (p *initProcess) start() error {
 	if err != nil {
 		return newSystemError(err)
 	}
+	// Save the standard descriptor names before the container process
+	// can potentially move them (e.g., via dup2()).  If we don't do this now,
+	// we won't know at checkpoint time which file descriptor to look up.
+	if err = saveStdPipes(p.pid(), p.config.Config); err != nil {
+		return newSystemError(err)
+	}
 	// Do this before syncing with child so that no children
 	// can escape the cgroup
 	if err := p.manager.Apply(p.pid()); err != nil {
@@ -246,4 +255,20 @@ func (p *initProcess) signal(sig os.Signal) error {
 		return errors.New("os: unsupported signal type")
 	}
 	return syscall.Kill(p.cmd.Process.Pid, s)
+}
+
+// Save process's std{in,out,err} file names as these will be
+// removed if/when the container is checkpointed.  We will need
+// this info to restore the container.
+func saveStdPipes(pid int, config *configs.Config) error {
+	dirPath := filepath.Join("/proc", strconv.Itoa(pid), "/fd")
+	for i := 0; i < 3; i++ {
+		f := filepath.Join(dirPath, strconv.Itoa(i))
+		target, err := os.Readlink(f)
+		if err != nil {
+			return err
+		}
+		config.StdFds[i] = target
+	}
+	return nil
 }

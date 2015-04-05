@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/codegangsta/cli"
 	"github.com/docker/libcontainer"
@@ -29,7 +30,15 @@ func loadConfig(context *cli.Context) (*configs.Config, error) {
 }
 
 func loadFactory(context *cli.Context) (libcontainer.Factory, error) {
-	return libcontainer.New(context.GlobalString("root"), libcontainer.Cgroupfs)
+	root := context.GlobalString("root")
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	return libcontainer.New(abs, libcontainer.Cgroupfs, func(l *libcontainer.LinuxFactory) error {
+		l.CriuPath = context.GlobalString("criu")
+		return nil
+	})
 }
 
 func getContainer(context *cli.Context) (libcontainer.Container, error) {

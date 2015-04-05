@@ -78,6 +78,7 @@ func init() {
 		for _, command := range [][]string{
 			{"attach", "Attach to a running container"},
 			{"build", "Build an image from a Dockerfile"},
+			{"checkpoint", "Checkpoint one or more running containers"},
 			{"commit", "Create a new image from a container's changes"},
 			{"cp", "Copy files/folders from a container's filesystem to the host path"},
 			{"create", "Create a new container"},
@@ -102,6 +103,7 @@ func init() {
 			{"push", "Push an image or a repository to a Docker registry server"},
 			{"rename", "Rename an existing container"},
 			{"restart", "Restart a running container"},
+			{"restore", "Restore one or more checkpointed containers"},
 			{"rm", "Remove one or more containers"},
 			{"rmi", "Remove one or more images"},
 			{"run", "Run a command in a new container"},
@@ -116,7 +118,7 @@ func init() {
 			{"version", "Show the Docker version information"},
 			{"wait", "Block until a container stops, then print its exit code"},
 		} {
-			help += fmt.Sprintf("    %-10.10s%s\n", command[0], command[1])
+			help += fmt.Sprintf("    %-11.11s%s\n", command[0], command[1])
 		}
 		help += "\nRun 'docker COMMAND --help' for more information on a command."
 		fmt.Fprintf(os.Stdout, "%s\n", help)
