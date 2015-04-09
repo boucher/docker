@@ -5,15 +5,20 @@ package libcontainer
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/docker/libcontainer/cgroups"
 	"github.com/docker/libcontainer/configs"
+	"github.com/docker/libcontainer/criurpc"
+	"github.com/golang/protobuf/proto"
 )
 
 type linuxContainer struct {
@@ -24,6 +29,7 @@ type linuxContainer struct {
 	initPath      string
 	initArgs      []string
 	initProcess   parentProcess
+	criuPath      string
 	m             sync.Mutex
 }
 
@@ -106,7 +112,6 @@ func (c *linuxContainer) Start(process *Process) error {
 	}
 	process.ops = parent
 	if doInit {
-
 		c.updateState(parent)
 	}
 	return nil
@@ -216,6 +221,12 @@ func newPipe() (parent *os.File, child *os.File, err error) {
 func (c *linuxContainer) Destroy() error {
 	c.m.Lock()
 	defer c.m.Unlock()
+	// Since the state.json and CRIU image files are in the c.root
+	// directory, we should not remove it after checkpoint.  Also,
+	// when     CRIU exits after restore, we should not kill the processes.
+	if _, err := os.Stat(filepath.Join(c.root, "checkpoint")); err == nil {
+		return nil
+	}
 	status, err := c.currentStatus()
 	if err != nil {
 		return err
@@ -250,6 +261,352 @@ func (c *linuxContainer) Resume() error {
 
 func (c *linuxContainer) NotifyOOM() (<-chan struct{}, error) {
 	return notifyOnOOM(c.cgroupManager.GetPaths())
+}
+
+// XXX debug support, remove when debugging done.
+func addArgsFromEnv(evar string, args *[]string) {
+	if e := os.Getenv(evar); e != "" {
+		for _, f := range strings.Fields(e) {
+			*args = append(*args, f)
+		}
+	}
+	fmt.Printf(">>> criu %v\n", *args)
+}
+
+func (c *linuxContainer) checkCriuVersion() error {
+	var x, y, z int
+
+	out, err := exec.Command(c.criuPath, "-V").Output()
+	if err != nil {
+		return err
+	}
+
+	n, err := fmt.Sscanf(string(out), "Version: %d.%d.%d", &x, &y, &z)
+	if n < 2 || err != nil {
+		return fmt.Errorf("Unable to parse the CRIU version: %s", out)
+	}
+
+	if x*10000+y*100+z < 10501 {
+		return fmt.Errorf("CRIU version must be 1.5.1 or higher")
+	}
+
+	return nil
+}
+
+func (c *linuxContainer) Checkpoint(criuOpts *CriuOpts) error {
+	c.m.Lock()
+	defer c.m.Unlock()
+
+	if err := c.checkCriuVersion(); err != nil {
+		return err
+	}
+
+	if criuOpts.ImagesDirectory == "" {
+		criuOpts.ImagesDirectory = filepath.Join(c.root, "checkpoint")
+	}
+
+	// Since a container can be C/R'ed multiple times,
+	// the checkpoint directory may already exist.
+	if err := os.Mkdir(criuOpts.ImagesDirectory, 0655); err != nil && !os.IsExist(err) {
+		return err
+	}
+
+	if criuOpts.WorkDirectory == "" {
+		criuOpts.WorkDirectory = filepath.Join(c.root, "criu.work")
+	}
+
+	if err := os.Mkdir(criuOpts.WorkDirectory, 0655); err != nil && !os.IsExist(err) {
+		return err
+	}
+
+	if criuOpts.LogFile == "" {
+		criuOpts.LogFile = "dump.log"
+	}
+
+	args := []string{
+		"dump", "-v4",
+		"--manage-cgroups",
+		"--evasive-devices",
+		"--root", c.config.Rootfs,
+		"-t", strconv.Itoa(c.initProcess.pid()),
+		"--images-dir", criuOpts.ImagesDirectory,
+		"--work-dir", criuOpts.WorkDirectory,
+		"-o", criuOpts.LogFile,
+	}
+
+	if criuOpts.ShellJob {
+		args = append(args, "--shell-job")
+	}
+
+	if criuOpts.LeaveRunning {
+		args = append(args, "--leave-running")
+	}
+
+	if criuOpts.LeaveStopped {
+		args = append(args, "--leave-stopped")
+	}
+
+	if criuOpts.TcpEstablished {
+		args = append(args, "--tcp-established")
+	}
+
+	if criuOpts.ExternalUnixConnections {
+		args = append(args, "--ext-unix-sk")
+	}
+
+	if criuOpts.PreviousImagesDirectory != "" {
+		args = append(args, "--prev-images-dir", criuOpts.PreviousImagesDirectory)
+	}
+
+	for _, m := range c.config.Mounts {
+		if m.Device == "bind" {
+			mountDest := m.Destination
+			if strings.HasPrefix(mountDest, c.config.Rootfs) {
+				mountDest = mountDest[len(c.config.Rootfs):]
+			}
+			args = append(args, "--ext-mount-map", fmt.Sprintf("%s:%s", mountDest, m.Destination))
+		}
+	}
+
+	addArgsFromEnv("CRIU_C", &args) // XXX debug
+	if err := exec.Command(c.criuPath, args...).Run(); err != nil {
+		return err
+	}
+
+	log.Info("Checkpointed")
+	return nil
+}
+
+func (c *linuxContainer) Restore(process *Process, criuOpts *CriuOpts) error {
+	c.m.Lock()
+	defer c.m.Unlock()
+
+	if err := c.checkCriuVersion(); err != nil {
+		return err
+	}
+
+	pidfile := filepath.Join(c.root, "restoredpid")
+	// Make sure pidfile doesn't already exist from a
+	// previous restore.  Otherwise, CRIU will fail.
+	if err := os.Remove(pidfile); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	fds, err := syscall.Socketpair(syscall.AF_LOCAL, syscall.SOCK_SEQPACKET|syscall.SOCK_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+
+	criuClient := os.NewFile(uintptr(fds[0]), "criu-transport-client")
+	criuServer := os.NewFile(uintptr(fds[1]), "criu-transport-server")
+	defer criuClient.Close()
+	defer criuServer.Close()
+
+	if criuOpts.WorkDirectory == "" {
+		criuOpts.WorkDirectory = filepath.Join(c.root, "criu.work")
+	}
+	// Since a container can be C/R'ed multiple times,
+	// the work directory may already exist.
+	if err := os.Mkdir(criuOpts.WorkDirectory, 0655); err != nil && !os.IsExist(err) {
+		return err
+	}
+	workDir, err := os.Open(criuOpts.WorkDirectory)
+	if err != nil {
+		return err
+	}
+	defer workDir.Close()
+
+	if criuOpts.ImagesDirectory == "" {
+		criuOpts.ImagesDirectory = filepath.Join(c.root, "checkpoint")
+	}
+	imageDir, err := os.Open(criuOpts.ImagesDirectory)
+	if err != nil {
+		return err
+	}
+	defer imageDir.Close()
+
+	if criuOpts.LogFile == "" {
+		criuOpts.LogFile = "restore.log"
+	}
+
+	t := criurpc.CriuReqType_RESTORE
+	req := criurpc.CriuReq{
+		Type: &t,
+		Opts: &criurpc.CriuOpts{
+			ImagesDirFd:    proto.Int32(int32(imageDir.Fd())),
+			WorkDirFd:      proto.Int32(int32(workDir.Fd())),
+			EvasiveDevices: proto.Bool(true),
+			LogLevel:       proto.Int32(4),
+			LogFile:        proto.String(criuOpts.LogFile),
+			RstSibling:     proto.Bool(true),
+			Root:           proto.String(c.config.Rootfs),
+			ManageCgroups:  proto.Bool(true),
+			NotifyScripts:  proto.Bool(true),
+			ShellJob: 		proto.Bool(criuOpts.ShellJob),
+			ExtUnixSk: 		proto.Bool(criuOpts.ExternalUnixConnections),
+			TcpEstablished: proto.Bool(criuOpts.TcpEstablished),
+		},
+	}
+	for _, m := range c.config.Mounts {
+		if m.Device == "bind" {
+			extMnt := new(criurpc.ExtMountMap)
+			extMnt.Key = proto.String(m.Destination)
+			extMnt.Val = proto.String(m.Source)
+			req.Opts.ExtMnt = append(req.Opts.ExtMnt, extMnt)
+		}
+	}
+	// Pipes that were previously set up for std{in,out,err}
+	// were removed after checkpoint.  Use the new ones.
+	var i int32
+	for i = 0; i < 3; i++ {
+		if s := c.config.StdFds[i]; strings.Contains(s, "pipe:") {
+			inheritFd := new(criurpc.InheritFd)
+			inheritFd.Key = proto.String(s)
+			inheritFd.Fd = proto.Int32(i)
+			req.Opts.InheritFd = append(req.Opts.InheritFd, inheritFd)
+		}
+	}
+
+	// XXX This doesn't really belong here as our caller should have
+	//     already set up root (including devices) and mounted it.
+	/*
+		// remount root for restore
+		if err := syscall.Mount(c.config.Rootfs, c.config.Rootfs, "bind", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
+			return err
+		}
+
+		defer syscall.Unmount(c.config.Rootfs, syscall.MNT_DETACH)
+	*/
+	args := []string{"swrk", "3"}
+	cmd := exec.Command(c.criuPath, args...)
+	cmd.Stdin = process.Stdin
+	cmd.Stdout = process.Stdout
+	cmd.Stderr = process.Stderr
+	cmd.ExtraFiles = append(cmd.ExtraFiles, criuServer)
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	criuServer.Close()
+
+	defer func() {
+		criuClient.Close()
+		st, err := cmd.Process.Wait()
+		if err != nil {
+			return
+		}
+		log.Warn(st.String())
+	}()
+
+	err = saveStdPipes(cmd.Process.Pid, c.config)
+	if err != nil {
+		return err
+	}
+
+	data, err := proto.Marshal(&req)
+	if err != nil {
+		return err
+	}
+	_, err = criuClient.Write(data)
+	if err != nil {
+		return err
+	}
+
+	var pid int32 = math.MinInt32
+
+	buf := make([]byte, 10*4096)
+	for true {
+		n, err := criuClient.Read(buf)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return fmt.Errorf("unexpected EOF")
+		}
+		if n == len(buf) {
+			return fmt.Errorf("buffer is too small")
+		}
+
+		resp := new(criurpc.CriuResp)
+		err = proto.Unmarshal(buf[:n], resp)
+		if err != nil {
+			return err
+		}
+
+		log.Debug(resp.String())
+		if !resp.GetSuccess() {
+			return fmt.Errorf("criu failed: type %d errno %d", t, resp.GetCrErrno())
+		}
+
+		t = resp.GetType()
+		switch {
+		case t == criurpc.CriuReqType_NOTIFY:
+			notify := resp.GetNotify()
+			if notify == nil {
+				return fmt.Errorf("invalid response: %s", resp.String())
+			}
+
+			if notify.GetScript() == "setup-namespaces" {
+				pid = notify.GetPid()
+			}
+
+			if notify.GetScript() == "post-restore" {
+				// In many case, restore from the images can be done only once.
+				// If we want to create snapshots, we need to snapshot the file system.
+				// FIXME: should this be configurable? disable for now
+				// os.RemoveAll(imagePath)
+
+				r, err := newRestoredProcess(int(pid))
+				if err != nil {
+					return err
+				}
+
+				// TODO: crosbymichael restore previous process information by saving the init process information in
+				// the container's state file or separate process state files.
+				if err := c.updateState(r); err != nil {
+					return err
+				}
+				process.ops = r
+			}
+
+			t = criurpc.CriuReqType_NOTIFY
+			req = criurpc.CriuReq{
+				Type:          &t,
+				NotifySuccess: proto.Bool(true),
+			}
+			data, err = proto.Marshal(&req)
+			if err != nil {
+				return err
+			}
+			n, err = criuClient.Write(data)
+			if err != nil {
+				return err
+			}
+			continue
+		case t == criurpc.CriuReqType_RESTORE:
+			restore := resp.GetRestore()
+			if restore != nil {
+				pid = restore.GetPid()
+				break
+			}
+		default:
+			return fmt.Errorf("unable to parse the response %s", resp.String())
+		}
+
+		break
+	}
+
+	// cmd.Wait() waits cmd.goroutines which are used for proxying file descriptors.
+	// Here we want to wait only the CRIU process.
+	st, err := cmd.Process.Wait()
+	if err != nil {
+		return err
+	}
+	if !st.Success() {
+		return fmt.Errorf("criu failed: %s", st.String())
+	}
+	log.Info("Restored")
+	return nil
 }
 
 func (c *linuxContainer) updateState(process parentProcess) error {
