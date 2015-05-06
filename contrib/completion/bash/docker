@@ -279,7 +279,7 @@ _docker_build() {
 
 	case "$cur" in
 		-*)
-			COMPREPLY=( $( compgen -W "--cpu-shares -c --cpuset-cpus --file -f --force-rm --help --memory -m --memory-swap --no-cache --pull --quiet -q --rm --tag -t" -- "$cur" ) )
+			COMPREPLY=( $( compgen -W "--cpu-shares -c --cpuset-cpus --cpu-quota --file -f --force-rm --help --memory -m --memory-swap --no-cache --pull --quiet -q --rm --tag -t" -- "$cur" ) )
 			;;
 		*)
 			local counter="$(__docker_pos_first_nonflag '--tag|-t')"
@@ -407,7 +407,7 @@ _docker_events() {
 _docker_exec() {
 	case "$cur" in
 		-*)
-			COMPREPLY=( $( compgen -W "--detach -d --help --interactive -i -t --tty" -- "$cur" ) )
+			COMPREPLY=( $( compgen -W "--detach -d --help --interactive -i --privileged -t --tty -u --user" -- "$cur" ) )
 			;;
 		*)
 			__docker_containers_running
@@ -770,6 +770,7 @@ _docker_run() {
 		--cidfile
 		--cpuset
 		--cpu-shares -c
+		--cpu-quota
 		--device
 		--dns
 		--dns-search
@@ -1150,6 +1151,7 @@ _docker() {
 		--dns
 		--dns-search
 		--exec-driver -e
+		--exec-opt
 		--fixed-cidr
 		--fixed-cidr-v6
 		--graph -g

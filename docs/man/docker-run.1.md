@@ -13,7 +13,9 @@ docker-run - Run a command in a new container
 [**--cap-drop**[=*[]*]]
 [**--cidfile**[=*CIDFILE*]]
 [**--cpuset-cpus**[=*CPUSET-CPUS*]]
+[**--cpuset-mems**[=*CPUSET-MEMS*]]
 [**-d**|**--detach**[=*false*]]
+[**--cpu-quota**[=*0*]]
 [**--device**[=*[]*]]
 [**--dns-search**[=*[]*]]
 [**--dns**[=*[]*]]
@@ -134,6 +136,20 @@ division of CPU shares:
 **--cpuset-cpus**=""
    CPUs in which to allow execution (0-3, 0,1)
 
+**--cpuset-mems**=""
+   Memory nodes (MEMs) in which to allow execution (0-3, 0,1). Only effective on NUMA systems.
+
+   If you have four memory nodes on your system (0-3), use `--cpuset-mems=0,1`
+then processes in your Docker container will only use memory from the first
+two memory nodes.
+
+**--cpu-quota**=0
+   Limit the CPU CFS (Completely Fair Scheduler) quota
+
+   Limit the container's CPU usage. By default, containers run with the full
+CPU resource. This flag tell the kernel to restrict the container's CPU usage
+to the quota you specify.
+
 **-d**, **--detach**=*true*|*false*
    Detached mode: run the container in the background and print the new container ID. The default is *false*.
 
@@ -222,7 +238,7 @@ which interface and port to use.
 **--lxc-conf**=[]
    (lxc exec-driver only) Add custom lxc options --lxc-conf="lxc.cgroup.cpuset.cpus = 0,1"
 
-**--log-driver**="|*json-file*|*syslog*|*none*"
+**--log-driver**="|*json-file*|*syslog*|*journald*|*none*"
   Logging driver for container. Default is defined by daemon `--log-driver` flag.
   **Warning**: `docker logs` command works only for `json-file` logging driver.
 
@@ -416,7 +432,7 @@ you’d like to connect instead, as in:
 
 ## Sharing IPC between containers
 
-Using shm_server.c available here: http://www.cs.cf.ac.uk/Dave/C/node27.html
+Using shm_server.c available here: https://www.cs.cf.ac.uk/Dave/C/node27.html
 
 Testing `--ipc=host` mode:
 

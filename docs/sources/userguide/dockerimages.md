@@ -1,8 +1,8 @@
-page_title: Working with Docker Images
+page_title: Working with Docker images
 page_description: How to work with Docker images.
 page_keywords: documentation, docs, the docker guide, docker guide, docker, docker platform, virtualization framework, docker.io, Docker images, Docker image, image management, Docker repos, Docker repositories, docker, docker tag, docker tags, Docker Hub, collaboration
 
-# Working with Docker Images
+# Working with Docker images
 
 In the [introduction](/introduction/understanding-docker/) we've discovered that Docker
 images are the basis of containers. In the
@@ -131,11 +131,11 @@ term `sinatra`.
 We can see we've returned a lot of images that use the term `sinatra`. We've
 returned a list of image names, descriptions, Stars (which measure the social
 popularity of images - if a user likes an image then they can "star" it), and
-the Official and Automated build statuses. Official repositories are built and
-maintained by the [Stackbrew](https://github.com/docker/stackbrew) project,
-and Automated repositories are [Automated Builds](
-/userguide/dockerrepos/#automated-builds) that allow you to validate the source
-and content of an image.
+the Official and Automated build statuses.
+[Official Repositories](/docker-hub/official_repos) are a carefully curated set
+of Docker repositories supported by Docker, Inc.  Automated repositories are
+[Automated Builds](/userguide/dockerrepos/#automated-builds) that allow you to
+validate the source and content of an image.
 
 We've reviewed the images available to use and we decided to use the
 `training/sinatra` image. So far we've seen two types of images repositories,
@@ -504,6 +504,25 @@ Let's see our new tag using the `docker images` command.
     ouruser/sinatra     latest  5db5f8471261  11 hours ago   446.7 MB
     ouruser/sinatra     devel   5db5f8471261  11 hours ago   446.7 MB
     ouruser/sinatra     v2      5db5f8471261  11 hours ago   446.7 MB
+
+## Image Digests
+
+Images that use the v2 or later format have a content-addressable identifier
+called a `digest`. As long as the input used to generate the image is
+unchanged, the digest value is predictable. To list image digest values, use
+the `--digests` flag:
+
+    $ docker images --digests | head
+    REPOSITORY                         TAG                 DIGEST                                                                     IMAGE ID            CREATED             VIRTUAL SIZE
+    ouruser/sinatra                    latest              sha256:cbbf2f9a99b47fc460d422812b6a5adff7dfee951d8fa2e4a98caa0382cfbdbf    5db5f8471261        11 hours ago        446.7 MB
+
+When pushing or pulling to a 2.0 registry, the `push` or `pull` command
+output includes the image digest. You can `pull` using a digest value.
+
+    $ docker pull ouruser/sinatra@cbbf2f9a99b47fc460d422812b6a5adff7dfee951d8fa2e4a98caa0382cfbdbf
+
+You can also reference by digest in `create`, `run`, and `rmi` commands, as well as the
+`FROM` image reference in a Dockerfile.
 
 ## Push an image to Docker Hub
 

@@ -8,13 +8,14 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/docker/docker/api/types"
 	flag "github.com/docker/docker/pkg/mflag"
-	"github.com/docker/docker/utils"
 )
 
 // CmdInspect displays low-level information on one or more containers or images.
 //
 // Usage: docker inspect [OPTIONS] CONTAINER|IMAGE [CONTAINER|IMAGE...]
+
 func (cli *DockerCli) CmdInspect(args ...string) error {
 	cmd := cli.Subcmd("inspect", "CONTAINER|IMAGE [CONTAINER|IMAGE...]", "Return low-level information on a container or image", true)
 	tmplStr := cmd.String([]string{"f", "#format", "-format"}, "", "Format the output using the given go template")
@@ -27,19 +28,21 @@ func (cli *DockerCli) CmdInspect(args ...string) error {
 		var err error
 		if tmpl, err = template.New("").Funcs(funcMap).Parse(*tmplStr); err != nil {
 			fmt.Fprintf(cli.err, "Template parsing error: %v\n", err)
-			return &utils.StatusError{StatusCode: 64,
+			return StatusError{StatusCode: 64,
 				Status: "Template parsing error: " + err.Error()}
 		}
 	}
 
 	indented := new(bytes.Buffer)
-	indented.WriteByte('[')
+	indented.WriteString("[\n")
 	status := 0
+	isImage := false
 
 	for _, name := range cmd.Args() {
 		obj, _, err := readBody(cli.call("GET", "/containers/"+name+"/json", nil, nil))
 		if err != nil {
 			obj, _, err = readBody(cli.call("GET", "/images/"+name+"/json", nil, nil))
+			isImage = true
 			if err != nil {
 				if strings.Contains(err.Error(), "No such") {
 					fmt.Fprintf(cli.err, "Error: No such image or container: %s\n", name)
@@ -58,15 +61,29 @@ func (cli *DockerCli) CmdInspect(args ...string) error {
 				continue
 			}
 		} else {
-			// Has template, will render
-			var value interface{}
-			if err := json.Unmarshal(obj, &value); err != nil {
-				fmt.Fprintf(cli.err, "%s\n", err)
-				status = 1
-				continue
-			}
-			if err := tmpl.Execute(cli.out, value); err != nil {
-				return err
+			dec := json.NewDecoder(bytes.NewReader(obj))
+
+			if isImage {
+				inspPtr := types.ImageInspect{}
+				if err := dec.Decode(&inspPtr); err != nil {
+					fmt.Fprintf(cli.err, "%s\n", err)
+					status = 1
+					continue
+				}
+				if err := tmpl.Execute(cli.out, inspPtr); err != nil {
+					return err
+				}
+			} else {
+				inspPtr := types.ContainerJSON{}
+				if err := dec.Decode(&inspPtr); err != nil {
+					fmt.Fprintf(cli.err, "%s\n", err)
+					status = 1
+					continue
+				}
+				if err := tmpl.Execute(cli.out, inspPtr); err != nil {
+					return err
+
+				}
 			}
 			cli.out.Write([]byte{'\n'})
 		}
@@ -86,7 +103,7 @@ func (cli *DockerCli) CmdInspect(args ...string) error {
 	}
 
 	if status != 0 {
-		return &utils.StatusError{StatusCode: status}
+		return StatusError{StatusCode: status}
 	}
 	return nil
 }

@@ -19,7 +19,9 @@ import (
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/api"
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/autogen/dockerversion"
+	"github.com/docker/docker/cliconfig"
 	"github.com/docker/docker/engine"
 	"github.com/docker/docker/pkg/jsonmessage"
 	"github.com/docker/docker/pkg/signal"
@@ -29,9 +31,10 @@ import (
 )
 
 var (
-	ErrConnectionRefused = errors.New("Cannot connect to the Docker daemon. Is 'docker -d' running on this host?")
+	errConnectionRefused = errors.New("Cannot connect to the Docker daemon. Is 'docker -d' running on this host?")
 )
 
+// HTTPClient creates a new HTP client with the cli's client transport instance.
 func (cli *DockerCli) HTTPClient() *http.Client {
 	return &http.Client{Transport: cli.transport}
 }
@@ -65,6 +68,13 @@ func (cli *DockerCli) clientRequest(method, path string, in io.Reader, headers m
 	if err != nil {
 		return nil, "", -1, err
 	}
+
+	// Add CLI Config's HTTP Headers BEFORE we set the Docker headers
+	// then the user can't change OUR headers
+	for k, v := range cli.configFile.HttpHeaders {
+		req.Header.Set(k, v)
+	}
+
 	req.Header.Set("User-Agent", "Docker-Client/"+dockerversion.VERSION)
 	req.URL.Host = cli.addr
 	req.URL.Scheme = cli.scheme
@@ -86,7 +96,7 @@ func (cli *DockerCli) clientRequest(method, path string, in io.Reader, headers m
 	}
 	if err != nil {
 		if strings.Contains(err.Error(), "connection refused") {
-			return nil, "", statusCode, ErrConnectionRefused
+			return nil, "", statusCode, errConnectionRefused
 		}
 
 		if cli.tlsConfig == nil {
@@ -110,7 +120,7 @@ func (cli *DockerCli) clientRequest(method, path string, in io.Reader, headers m
 }
 
 func (cli *DockerCli) clientRequestAttemptLogin(method, path string, in io.Reader, out io.Writer, index *registry.IndexInfo, cmdName string) (io.ReadCloser, int, error) {
-	cmdAttempt := func(authConfig registry.AuthConfig) (io.ReadCloser, int, error) {
+	cmdAttempt := func(authConfig cliconfig.AuthConfig) (io.ReadCloser, int, error) {
 		buf, err := json.Marshal(authConfig)
 		if err != nil {
 			return nil, -1, err
@@ -141,14 +151,14 @@ func (cli *DockerCli) clientRequestAttemptLogin(method, path string, in io.Reade
 	}
 
 	// Resolve the Auth config relevant for this server
-	authConfig := cli.configFile.ResolveAuthConfig(index)
+	authConfig := registry.ResolveAuthConfig(cli.configFile, index)
 	body, statusCode, err := cmdAttempt(authConfig)
 	if statusCode == http.StatusUnauthorized {
 		fmt.Fprintf(cli.out, "\nPlease login prior to %s:\n", cmdName)
 		if err = cli.CmdLogin(index.GetAuthConfigKey()); err != nil {
 			return nil, -1, err
 		}
-		authConfig = cli.configFile.ResolveAuthConfig(index)
+		authConfig = registry.ResolveAuthConfig(cli.configFile, index)
 		return cmdAttempt(authConfig)
 	}
 	return body, statusCode, err
@@ -230,11 +240,12 @@ func waitForExit(cli *DockerCli, containerID string) (int, error) {
 		return -1, err
 	}
 
-	var out engine.Env
-	if err := out.Decode(stream); err != nil {
+	var res types.ContainerWaitResponse
+	if err := json.NewDecoder(stream).Decode(&res); err != nil {
 		return -1, err
 	}
-	return out.GetInt("StatusCode"), nil
+
+	return res.StatusCode, nil
 }
 
 // getExitCode perform an inspect on the container. It returns
@@ -243,19 +254,18 @@ func getExitCode(cli *DockerCli, containerID string) (bool, int, error) {
 	stream, _, err := cli.call("GET", "/containers/"+containerID+"/json", nil, nil)
 	if err != nil {
 		// If we can't connect, then the daemon probably died.
-		if err != ErrConnectionRefused {
+		if err != errConnectionRefused {
 			return false, -1, err
 		}
 		return false, -1, nil
 	}
 
-	var result engine.Env
-	if err := result.Decode(stream); err != nil {
+	var c types.ContainerJSON
+	if err := json.NewDecoder(stream).Decode(&c); err != nil {
 		return false, -1, err
 	}
 
-	state := result.GetSubEnv("State")
-	return state.GetBool("Running"), state.GetInt("ExitCode"), nil
+	return c.State.Running, c.State.ExitCode, nil
 }
 
 // getExecExitCode perform an inspect on the exec command. It returns
@@ -264,18 +274,24 @@ func getExecExitCode(cli *DockerCli, execID string) (bool, int, error) {
 	stream, _, err := cli.call("GET", "/exec/"+execID+"/json", nil, nil)
 	if err != nil {
 		// If we can't connect, then the daemon probably died.
-		if err != ErrConnectionRefused {
+		if err != errConnectionRefused {
 			return false, -1, err
 		}
 		return false, -1, nil
 	}
 
-	var result engine.Env
-	if err := result.Decode(stream); err != nil {
+	//TODO: Should we reconsider having a type in api/types?
+	//this is a response to exex/id/json not container
+	var c struct {
+		Running  bool
+		ExitCode int
+	}
+
+	if err := json.NewDecoder(stream).Decode(&c); err != nil {
 		return false, -1, err
 	}
 
-	return result.GetBool("Running"), result.GetInt("ExitCode"), nil
+	return c.Running, c.ExitCode, nil
 }
 
 func (cli *DockerCli) monitorTtySize(id string, isExec bool) error {
@@ -299,7 +315,7 @@ func (cli *DockerCli) monitorTtySize(id string, isExec bool) error {
 		sigchan := make(chan os.Signal, 1)
 		gosignal.Notify(sigchan, signal.SIGWINCH)
 		go func() {
-			for _ = range sigchan {
+			for range sigchan {
 				cli.resizeTty(id, isExec)
 			}
 		}()

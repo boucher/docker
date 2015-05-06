@@ -4,23 +4,23 @@ import (
 	"bytes"
 	"os/exec"
 	"strings"
-	"testing"
 	"time"
+
+	"github.com/go-check/check"
 
 	"code.google.com/p/go.net/websocket"
 )
 
-func TestGetContainersAttachWebsocket(t *testing.T) {
+func (s *DockerSuite) TestGetContainersAttachWebsocket(c *check.C) {
 	runCmd := exec.Command(dockerBinary, "run", "-dit", "busybox", "cat")
 	out, _, err := runCommandWithOutput(runCmd)
 	if err != nil {
-		t.Fatalf(out, err)
+		c.Fatalf(out, err)
 	}
-	defer deleteAllContainers()
 
 	rwc, err := sockConn(time.Duration(10 * time.Second))
 	if err != nil {
-		t.Fatal(err)
+		c.Fatal(err)
 	}
 
 	cleanedContainerID := strings.TrimSpace(out)
@@ -29,39 +29,51 @@ func TestGetContainersAttachWebsocket(t *testing.T) {
 		"http://localhost",
 	)
 	if err != nil {
-		t.Fatal(err)
+		c.Fatal(err)
 	}
 
 	ws, err := websocket.NewClient(config, rwc)
 	if err != nil {
-		t.Fatal(err)
+		c.Fatal(err)
 	}
 	defer ws.Close()
 
 	expected := []byte("hello")
 	actual := make([]byte, len(expected))
-	outChan := make(chan string)
+
+	outChan := make(chan error)
 	go func() {
-		if _, err := ws.Read(actual); err != nil {
-			t.Fatal(err)
-		}
-		outChan <- "done"
+		_, err := ws.Read(actual)
+		outChan <- err
+		close(outChan)
 	}()
 
-	inChan := make(chan string)
+	inChan := make(chan error)
 	go func() {
-		if _, err := ws.Write(expected); err != nil {
-			t.Fatal(err)
-		}
-		inChan <- "done"
+		_, err := ws.Write(expected)
+		inChan <- err
+		close(inChan)
 	}()
 
-	<-inChan
-	<-outChan
-
-	if !bytes.Equal(expected, actual) {
-		t.Fatal("Expected output on websocket to match input")
+	select {
+	case err := <-inChan:
+		if err != nil {
+			c.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		c.Fatal("Timeout writing to ws")
 	}
 
-	logDone("container attach websocket - can echo input via cat")
+	select {
+	case err := <-outChan:
+		if err != nil {
+			c.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		c.Fatal("Timeout reading from ws")
+	}
+
+	if !bytes.Equal(expected, actual) {
+		c.Fatal("Expected output on websocket to match input")
+	}
 }

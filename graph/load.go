@@ -4,21 +4,20 @@ package graph
 
 import (
 	"encoding/json"
+	"io"
 	"io/ioutil"
 	"os"
 	"path"
 
 	"github.com/Sirupsen/logrus"
-	"github.com/docker/docker/engine"
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/chrootarchive"
-	"github.com/docker/docker/utils"
 )
 
 // Loads a set of images into the repository. This is the complementary of ImageExport.
 // The input stream is an uncompressed tar ball containing images and metadata.
-func (s *TagStore) CmdLoad(job *engine.Job) error {
+func (s *TagStore) Load(inTar io.ReadCloser, outStream io.Writer) error {
 	tmpImageDir, err := ioutil.TempDir("", "docker-import-")
 	if err != nil {
 		return err
@@ -42,7 +41,7 @@ func (s *TagStore) CmdLoad(job *engine.Job) error {
 		excludes[i] = k
 		i++
 	}
-	if err := chrootarchive.Untar(job.Stdin, repoDir, &archive.TarOptions{ExcludePatterns: excludes}); err != nil {
+	if err := chrootarchive.Untar(inTar, repoDir, &archive.TarOptions{ExcludePatterns: excludes}); err != nil {
 		return err
 	}
 
@@ -53,35 +52,39 @@ func (s *TagStore) CmdLoad(job *engine.Job) error {
 
 	for _, d := range dirs {
 		if d.IsDir() {
-			if err := s.recursiveLoad(job.Eng, d.Name(), tmpImageDir); err != nil {
+			if err := s.recursiveLoad(d.Name(), tmpImageDir); err != nil {
 				return err
 			}
 		}
 	}
 
-	repositoriesJson, err := ioutil.ReadFile(path.Join(tmpImageDir, "repo", "repositories"))
-	if err == nil {
-		repositories := map[string]Repository{}
-		if err := json.Unmarshal(repositoriesJson, &repositories); err != nil {
+	reposJSONFile, err := os.Open(path.Join(tmpImageDir, "repo", "repositories"))
+	if err != nil {
+		if !os.IsNotExist(err) {
 			return err
 		}
+		return nil
+	}
+	defer reposJSONFile.Close()
 
-		for imageName, tagMap := range repositories {
-			for tag, address := range tagMap {
-				if err := s.SetLoad(imageName, tag, address, true, job.Stdout); err != nil {
-					return err
-				}
+	repositories := map[string]Repository{}
+	if err := json.NewDecoder(reposJSONFile).Decode(&repositories); err != nil {
+		return err
+	}
+
+	for imageName, tagMap := range repositories {
+		for tag, address := range tagMap {
+			if err := s.SetLoad(imageName, tag, address, true, outStream); err != nil {
+				return err
 			}
 		}
-	} else if !os.IsNotExist(err) {
-		return err
 	}
 
 	return nil
 }
 
-func (s *TagStore) recursiveLoad(eng *engine.Engine, address, tmpImageDir string) error {
-	if err := eng.Job("image_get", address).Run(); err != nil {
+func (s *TagStore) recursiveLoad(address, tmpImageDir string) error {
+	if _, err := s.LookupImage(address); err != nil {
 		logrus.Debugf("Loading %s", address)
 
 		imageJson, err := ioutil.ReadFile(path.Join(tmpImageDir, "repo", address, "json"))
@@ -100,7 +103,7 @@ func (s *TagStore) recursiveLoad(eng *engine.Engine, address, tmpImageDir string
 			logrus.Debugf("Error unmarshalling json", err)
 			return err
 		}
-		if err := utils.ValidateID(img.ID); err != nil {
+		if err := image.ValidateID(img.ID); err != nil {
 			logrus.Debugf("Error validating ID: %s", err)
 			return err
 		}
@@ -120,7 +123,7 @@ func (s *TagStore) recursiveLoad(eng *engine.Engine, address, tmpImageDir string
 
 		if img.Parent != "" {
 			if !s.graph.Exists(img.Parent) {
-				if err := s.recursiveLoad(eng, img.Parent, tmpImageDir); err != nil {
+				if err := s.recursiveLoad(img.Parent, tmpImageDir); err != nil {
 					return err
 				}
 			}

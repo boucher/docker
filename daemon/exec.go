@@ -10,7 +10,6 @@ import (
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/daemon/execdriver"
 	"github.com/docker/docker/daemon/execdriver/lxc"
-	"github.com/docker/docker/engine"
 	"github.com/docker/docker/pkg/broadcastwriter"
 	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/docker/pkg/promise"
@@ -111,33 +110,26 @@ func (d *Daemon) getActiveContainer(name string) (*Container, error) {
 	return container, nil
 }
 
-func (d *Daemon) ContainerExecCreate(job *engine.Job) error {
-	if len(job.Args) != 1 {
-		return fmt.Errorf("Usage: %s [options] container command [args]", job.Name)
-	}
+func (d *Daemon) ContainerExecCreate(config *runconfig.ExecConfig) (string, error) {
 
 	if strings.HasPrefix(d.execDriver.Name(), lxc.DriverName) {
-		return lxc.ErrExec
+		return "", lxc.ErrExec
 	}
 
-	var name = job.Args[0]
-
-	container, err := d.getActiveContainer(name)
+	container, err := d.getActiveContainer(config.Container)
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	config, err := runconfig.ExecConfigFromJob(job)
-	if err != nil {
-		return err
-	}
-
-	entrypoint, args := d.getEntrypointAndArgs(nil, config.Cmd)
+	cmd := runconfig.NewCommand(config.Cmd...)
+	entrypoint, args := d.getEntrypointAndArgs(runconfig.NewEntrypoint(), cmd)
 
 	processConfig := execdriver.ProcessConfig{
 		Tty:        config.Tty,
 		Entrypoint: entrypoint,
 		Arguments:  args,
+		User:       config.User,
+		Privileged: config.Privileged,
 	}
 
 	execConfig := &execConfig{
@@ -155,20 +147,15 @@ func (d *Daemon) ContainerExecCreate(job *engine.Job) error {
 
 	d.registerExecCommand(execConfig)
 
-	job.Printf("%s\n", execConfig.ID)
+	return execConfig.ID, nil
 
-	return nil
 }
 
-func (d *Daemon) ContainerExecStart(job *engine.Job) error {
-	if len(job.Args) != 1 {
-		return fmt.Errorf("Usage: %s [options] exec", job.Name)
-	}
+func (d *Daemon) ContainerExecStart(execName string, stdin io.ReadCloser, stdout io.Writer, stderr io.Writer) error {
 
 	var (
 		cStdin           io.ReadCloser
 		cStdout, cStderr io.Writer
-		execName         = job.Args[0]
 	)
 
 	execConfig, err := d.getExecConfig(execName)
@@ -198,15 +185,15 @@ func (d *Daemon) ContainerExecStart(job *engine.Job) error {
 		go func() {
 			defer w.Close()
 			defer logrus.Debugf("Closing buffered stdin pipe")
-			io.Copy(w, job.Stdin)
+			io.Copy(w, stdin)
 		}()
 		cStdin = r
 	}
 	if execConfig.OpenStdout {
-		cStdout = job.Stdout
+		cStdout = stdout
 	}
 	if execConfig.OpenStderr {
-		cStderr = job.Stderr
+		cStderr = stderr
 	}
 
 	execConfig.StreamConfig.stderr = broadcastwriter.New()
@@ -227,8 +214,7 @@ func (d *Daemon) ContainerExecStart(job *engine.Job) error {
 	// the exitStatus) even after the cmd is done running.
 
 	go func() {
-		err := container.Exec(execConfig)
-		if err != nil {
+		if err := container.Exec(execConfig); err != nil {
 			execErr <- fmt.Errorf("Cannot run exec command %s in container %s: %s", execName, container.ID, err)
 		}
 	}()

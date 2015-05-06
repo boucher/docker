@@ -1,8 +1,8 @@
-page_title: Registry Documentation
+page_title: Registry documentation
 page_description: Documentation for docker Registry and Registry API
 page_keywords: docker, registry, api, hub
 
-# The Docker Hub and the Registry spec
+# The Docker Hub and the Registry 1.0 spec
 
 ## The three roles
 
@@ -28,9 +28,9 @@ The Docker Hub is authoritative for that information.
 There is only one instance of the Docker Hub, run and
 managed by Docker Inc.
 
-### Registry
+### Docker Registry 1.0
 
-The registry has the following characteristics:
+The 1.0 registry has the following characteristics:
 
  - It stores the images and the graph for a set of repositories
  - It does not have user accounts data
@@ -679,7 +679,7 @@ On every request, a special header can be returned:
 On the next request, the client will always pick a server from this
 list.
 
-## Authentication & Authorization
+## Authentication and authorization
 
 ### On the Docker Hub
 
@@ -747,7 +747,7 @@ Next request:
     GET /(...)
     Cookie: session="wD/J7LqL5ctqw8haL10vgfhrb2Q=?foo=UydiYXInCnAxCi4=&timestamp=RjEzNjYzMTQ5NDcuNDc0NjQzCi4="
 
-## Document Version
+## Document version
 
  - 1.0 : May 6th 2013 : initial release
  - 1.1 : June 1st 2013 : Added Delete Repository and way to handle new

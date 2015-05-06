@@ -51,12 +51,12 @@ name, user name, or description:
     tianon/centos  CentOS 5 and 6, created using rinse instea...   21
     ...
 
-There you can see two example results: `centos` and
-`tianon/centos`. The second result shows that it comes from
-the public repository of a user, named `tianon/`, while the first result,
-`centos`, doesn't explicitly list a repository which means that it comes from the
-trusted top-level namespace. The `/` character separates a user's
-repository from the image name.
+There you can see two example results: `centos` and `tianon/centos`. The second
+result shows that it comes from the public repository of a user, named
+`tianon/`, while the first result, `centos`, doesn't explicitly list a
+repository which means that it comes from the trusted top-level namespace for
+[Official Repositories](/docker-hub/official_repos). The `/` character separates
+a user's repository from the image name.
 
 Once you've found the image you want, you can download it with `docker pull <imagename>`:
 
@@ -101,7 +101,7 @@ information [here](http://docs.docker.com/docker-hub/).
 * Automated Builds
 * Webhooks
 
-### Private Repositories
+### Private repositories
 
 Sometimes you have images you don't want to make public and share with
 everyone. So Docker Hub allows you to have private repositories. You can
@@ -150,7 +150,7 @@ repository.
 You can create multiple Automated Builds per repository and configure them
 to point to specific `Dockerfile`'s or Git branches.
 
-#### Build Triggers
+#### Build triggers
 
 Automated Builds can also be triggered via a URL on Docker Hub. This
 allows you to rebuild an Automated build image on demand.

@@ -10,26 +10,15 @@ import (
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/pkg/parsers"
 	"github.com/docker/docker/pkg/version"
 	"github.com/docker/libtrust"
 )
 
 // Common constants for daemon and client.
 const (
-	APIVERSION            version.Version = "1.19"                 // Current REST API version
-	DEFAULTHTTPHOST                       = "127.0.0.1"            // Default HTTP Host used if only port is provided to -H flag e.g. docker -d -H tcp://:8080
-	DEFAULTUNIXSOCKET                     = "/var/run/docker.sock" // Docker daemon by default always listens on the default unix socket
-	DefaultDockerfileName string          = "Dockerfile"           // Default filename with Docker commands, read by docker build
+	APIVERSION            version.Version = "1.19"       // Current REST API version
+	DefaultDockerfileName string          = "Dockerfile" // Default filename with Docker commands, read by docker build
 )
-
-func ValidateHost(val string) (string, error) {
-	host, err := parsers.ParseHost(DEFAULTHTTPHOST, DEFAULTUNIXSOCKET, val)
-	if err != nil {
-		return val, err
-	}
-	return host, nil
-}
 
 type ByPrivatePort []types.Port
 
@@ -118,8 +107,7 @@ func MatchesContentType(contentType, expectedType string) bool {
 // LoadOrCreateTrustKey attempts to load the libtrust key at the given path,
 // otherwise generates a new one
 func LoadOrCreateTrustKey(trustKeyPath string) (libtrust.PrivateKey, error) {
-	err := os.MkdirAll(filepath.Dir(trustKeyPath), 0700)
-	if err != nil {
+	if err := os.MkdirAll(filepath.Dir(trustKeyPath), 0700); err != nil {
 		return nil, err
 	}
 	trustKey, err := libtrust.LoadKeyFile(trustKeyPath)

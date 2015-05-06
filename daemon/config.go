@@ -29,6 +29,7 @@ type Config struct {
 	GraphDriver          string
 	GraphOptions         []string
 	ExecDriver           string
+	ExecOptions          []string
 	Mtu                  int
 	SocketGroup          string
 	EnableCors           bool
@@ -58,6 +59,8 @@ func (config *Config) InstallFlags() {
 	flag.StringVar(&config.Bridge.Iface, []string{"b", "-bridge"}, "", "Attach containers to a network bridge")
 	flag.StringVar(&config.Bridge.FixedCIDR, []string{"-fixed-cidr"}, "", "IPv4 subnet for fixed IPs")
 	flag.StringVar(&config.Bridge.FixedCIDRv6, []string{"-fixed-cidr-v6"}, "", "IPv6 subnet for fixed IPs")
+	flag.StringVar(&config.Bridge.DefaultGatewayIPv4, []string{"-default-gateway"}, "", "Container default gateway IPv4 address")
+	flag.StringVar(&config.Bridge.DefaultGatewayIPv6, []string{"-default-gateway-v6"}, "", "Container default gateway IPv6 address")
 	flag.BoolVar(&config.Bridge.InterContainerCommunication, []string{"#icc", "-icc"}, true, "Enable inter-container communication")
 	flag.StringVar(&config.GraphDriver, []string{"s", "-storage-driver"}, "", "Storage driver to use")
 	flag.StringVar(&config.ExecDriver, []string{"e", "-exec-driver"}, "native", "Exec driver to use")
@@ -68,13 +71,14 @@ func (config *Config) InstallFlags() {
 	flag.StringVar(&config.CorsHeaders, []string{"-api-cors-header"}, "", "Set CORS headers in the remote API")
 	opts.IPVar(&config.Bridge.DefaultIp, []string{"#ip", "-ip"}, "0.0.0.0", "Default IP when binding container ports")
 	opts.ListVar(&config.GraphOptions, []string{"-storage-opt"}, "Set storage driver options")
+	opts.ListVar(&config.ExecOptions, []string{"-exec-opt"}, "Set exec driver options")
 	// FIXME: why the inconsistency between "hosts" and "sockets"?
 	opts.IPListVar(&config.Dns, []string{"#dns", "-dns"}, "DNS server to use")
 	opts.DnsSearchListVar(&config.DnsSearch, []string{"-dns-search"}, "DNS search domains to use")
 	opts.LabelListVar(&config.Labels, []string{"-label"}, "Set key=value labels to the daemon")
 	config.Ulimits = make(map[string]*ulimit.Ulimit)
 	opts.UlimitMapVar(config.Ulimits, []string{"-default-ulimit"}, "Set default ulimits for containers")
-	flag.StringVar(&config.LogConfig.Type, []string{"-log-driver"}, "json-file", "Containers logging driver")
+	flag.StringVar(&config.LogConfig.Type, []string{"-log-driver"}, "json-file", "Default driver for container logs")
 }
 
 func getDefaultNetworkMtu() int {

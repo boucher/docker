@@ -94,7 +94,7 @@ prerequisite installed, Docker's installation process adds it.
 
 ##Installing Docker on Ubuntu
 
-Make sure you have intalled the prerequisites for your Ubuntu version. Then,
+Make sure you have installed the prerequisites for your Ubuntu version. Then,
 install Docker using the following:
 
 1. Log into your Ubuntu installation as a user with `sudo` privileges.
@@ -127,7 +127,7 @@ install Docker using the following:
 
 	This command downloads a test image and runs it in a container.
 
-## Optional Configurations for Docker on Ubuntu 
+## Optional configurations for Docker on Ubuntu 
 
 This section contains optional procedures for configuring your Ubuntu to work
 better with Docker.
@@ -137,7 +137,7 @@ better with Docker.
 * [Enable UFW forwarding](#enable-ufw-forwarding) 
 * [Configure a DNS server for use by Docker](#configure-a-dns-server-for-docker)
 
-### Create a docker group		
+### Create a Docker group		
 
 The `docker` daemon binds to a Unix socket instead of a TCP port. By default
 that Unix socket is owned by the user `root` and other users can access it with
@@ -253,7 +253,7 @@ The warning occurs because Docker containers can't use the local DNS nameserver.
 Instead, Docker defaults to using an external nameserver.
 
 To avoid this warning, you can specify a DNS server for use by Docker
-containers. Or, you can disable `dnsmasq` in NetworkManager. Though, disabiling
+containers. Or, you can disable `dnsmasq` in NetworkManager. Though, disabling
 `dnsmasq` might make DNS resolution slower on some networks.
 
 To specify a DNS server for use by Docker:

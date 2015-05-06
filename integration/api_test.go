@@ -4,336 +4,21 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/docker/docker/api"
 	"github.com/docker/docker/api/server"
 	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/builder"
 	"github.com/docker/docker/engine"
 	"github.com/docker/docker/runconfig"
 	"github.com/docker/docker/vendor/src/code.google.com/p/go/src/pkg/archive/tar"
 )
-
-func TestSaveImageAndThenLoad(t *testing.T) {
-	eng := NewTestEngine(t)
-	defer mkDaemonFromEngine(eng, t).Nuke()
-
-	// save image
-	r := httptest.NewRecorder()
-	req, err := http.NewRequest("GET", "/images/"+unitTestImageID+"/get", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	server.ServeRequest(eng, api.APIVERSION, r, req)
-	if r.Code != http.StatusOK {
-		t.Fatalf("%d OK expected, received %d\n", http.StatusOK, r.Code)
-	}
-	tarball := r.Body
-
-	// delete the image
-	r = httptest.NewRecorder()
-	req, err = http.NewRequest("DELETE", "/images/"+unitTestImageID, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	server.ServeRequest(eng, api.APIVERSION, r, req)
-	if r.Code != http.StatusOK {
-		t.Fatalf("%d OK expected, received %d\n", http.StatusOK, r.Code)
-	}
-
-	// make sure there is no image
-	r = httptest.NewRecorder()
-	req, err = http.NewRequest("GET", "/images/"+unitTestImageID+"/get", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	server.ServeRequest(eng, api.APIVERSION, r, req)
-	if r.Code != http.StatusNotFound {
-		t.Fatalf("%d NotFound expected, received %d\n", http.StatusNotFound, r.Code)
-	}
-
-	// load the image
-	r = httptest.NewRecorder()
-	req, err = http.NewRequest("POST", "/images/load", tarball)
-	if err != nil {
-		t.Fatal(err)
-	}
-	server.ServeRequest(eng, api.APIVERSION, r, req)
-	if r.Code != http.StatusOK {
-		t.Fatalf("%d OK expected, received %d\n", http.StatusOK, r.Code)
-	}
-
-	// finally make sure the image is there
-	r = httptest.NewRecorder()
-	req, err = http.NewRequest("GET", "/images/"+unitTestImageID+"/get", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	server.ServeRequest(eng, api.APIVERSION, r, req)
-	if r.Code != http.StatusOK {
-		t.Fatalf("%d OK expected, received %d\n", http.StatusOK, r.Code)
-	}
-}
-
-func TestGetContainersTop(t *testing.T) {
-	eng := NewTestEngine(t)
-	defer mkDaemonFromEngine(eng, t).Nuke()
-
-	containerID := createTestContainer(eng,
-		&runconfig.Config{
-			Image:     unitTestImageID,
-			Cmd:       []string{"/bin/sh", "-c", "cat"},
-			OpenStdin: true,
-		},
-		t,
-	)
-	defer func() {
-		// Make sure the process dies before destroying daemon
-		containerKill(eng, containerID, t)
-		containerWait(eng, containerID, t)
-	}()
-
-	startContainer(eng, containerID, t)
-
-	setTimeout(t, "Waiting for the container to be started timed out", 10*time.Second, func() {
-		for {
-			if containerRunning(eng, containerID, t) {
-				break
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	})
-
-	if !containerRunning(eng, containerID, t) {
-		t.Fatalf("Container should be running")
-	}
-
-	// Make sure sh spawn up cat
-	setTimeout(t, "read/write assertion timed out", 2*time.Second, func() {
-		in, out := containerAttach(eng, containerID, t)
-		if err := assertPipe("hello\n", "hello", out, in, 150); err != nil {
-			t.Fatal(err)
-		}
-	})
-
-	r := httptest.NewRecorder()
-	req, err := http.NewRequest("GET", "/containers/"+containerID+"/top?ps_args=aux", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	server.ServeRequest(eng, api.APIVERSION, r, req)
-	assertHttpNotError(r, t)
-	var procs engine.Env
-	if err := procs.Decode(r.Body); err != nil {
-		t.Fatal(err)
-	}
-
-	if len(procs.GetList("Titles")) != 11 {
-		t.Fatalf("Expected 11 titles, found %d.", len(procs.GetList("Titles")))
-	}
-	if procs.GetList("Titles")[0] != "USER" || procs.GetList("Titles")[10] != "COMMAND" {
-		t.Fatalf("Expected Titles[0] to be USER and Titles[10] to be COMMAND, found %s and %s.", procs.GetList("Titles")[0], procs.GetList("Titles")[10])
-	}
-	processes := [][]string{}
-	if err := procs.GetJson("Processes", &processes); err != nil {
-		t.Fatal(err)
-	}
-	if len(processes) != 2 {
-		t.Fatalf("Expected 2 processes, found %d.", len(processes))
-	}
-	if processes[0][10] != "/bin/sh -c cat" {
-		t.Fatalf("Expected `/bin/sh -c cat`, found %s.", processes[0][10])
-	}
-	if processes[1][10] != "/bin/sh -c cat" {
-		t.Fatalf("Expected `/bin/sh -c cat`, found %s.", processes[1][10])
-	}
-}
-
-func TestPostCommit(t *testing.T) {
-	eng := NewTestEngine(t)
-	b := &builder.BuilderJob{Engine: eng}
-	b.Install()
-	defer mkDaemonFromEngine(eng, t).Nuke()
-
-	// Create a container and remove a file
-	containerID := createTestContainer(eng,
-		&runconfig.Config{
-			Image: unitTestImageID,
-			Cmd:   []string{"touch", "/test"},
-		},
-		t,
-	)
-
-	containerRun(eng, containerID, t)
-
-	req, err := http.NewRequest("POST", "/commit?repo=testrepo&testtag=tag&container="+containerID, bytes.NewReader([]byte{}))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	r := httptest.NewRecorder()
-	server.ServeRequest(eng, api.APIVERSION, r, req)
-	assertHttpNotError(r, t)
-	if r.Code != http.StatusCreated {
-		t.Fatalf("%d Created expected, received %d\n", http.StatusCreated, r.Code)
-	}
-
-	var env engine.Env
-	if err := env.Decode(r.Body); err != nil {
-		t.Fatal(err)
-	}
-	if err := eng.Job("image_inspect", env.Get("Id")).Run(); err != nil {
-		t.Fatalf("The image has not been committed")
-	}
-}
-
-func TestPostContainersCreate(t *testing.T) {
-	eng := NewTestEngine(t)
-	defer mkDaemonFromEngine(eng, t).Nuke()
-
-	configJSON, err := json.Marshal(&runconfig.Config{
-		Image:  unitTestImageID,
-		Memory: 33554432,
-		Cmd:    []string{"touch", "/test"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	req, err := http.NewRequest("POST", "/containers/create", bytes.NewReader(configJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	r := httptest.NewRecorder()
-	server.ServeRequest(eng, api.APIVERSION, r, req)
-	assertHttpNotError(r, t)
-	if r.Code != http.StatusCreated {
-		t.Fatalf("%d Created expected, received %d\n", http.StatusCreated, r.Code)
-	}
-
-	var apiRun engine.Env
-	if err := apiRun.Decode(r.Body); err != nil {
-		t.Fatal(err)
-	}
-	containerID := apiRun.Get("Id")
-
-	containerAssertExists(eng, containerID, t)
-	containerRun(eng, containerID, t)
-
-	if !containerFileExists(eng, containerID, "test", t) {
-		t.Fatal("Test file was not created")
-	}
-}
-
-func TestPostJsonVerify(t *testing.T) {
-	eng := NewTestEngine(t)
-	defer mkDaemonFromEngine(eng, t).Nuke()
-
-	configJSON, err := json.Marshal(&runconfig.Config{
-		Image:  unitTestImageID,
-		Memory: 33554432,
-		Cmd:    []string{"touch", "/test"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	req, err := http.NewRequest("POST", "/containers/create", bytes.NewReader(configJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	r := httptest.NewRecorder()
-
-	server.ServeRequest(eng, api.APIVERSION, r, req)
-
-	// Don't add Content-Type header
-	// req.Header.Set("Content-Type", "application/json")
-
-	server.ServeRequest(eng, api.APIVERSION, r, req)
-	if r.Code != http.StatusInternalServerError || !strings.Contains(((*r.Body).String()), "application/json") {
-		t.Fatal("Create should have failed due to no Content-Type header - got:", r)
-	}
-
-	// Now add header but with wrong type and retest
-	req.Header.Set("Content-Type", "application/xml")
-
-	server.ServeRequest(eng, api.APIVERSION, r, req)
-	if r.Code != http.StatusInternalServerError || !strings.Contains(((*r.Body).String()), "application/json") {
-		t.Fatal("Create should have failed due to wrong Content-Type header - got:", r)
-	}
-}
-
-// Issue 7941 - test to make sure a "null" in JSON is just ignored.
-// W/o this fix a null in JSON would be parsed into a string var as "null"
-func TestPostCreateNull(t *testing.T) {
-	eng := NewTestEngine(t)
-	daemon := mkDaemonFromEngine(eng, t)
-	defer daemon.Nuke()
-
-	configStr := fmt.Sprintf(`{
-		"Hostname":"",
-		"Domainname":"",
-		"Memory":0,
-		"MemorySwap":0,
-		"CpuShares":0,
-		"Cpuset":null,
-		"AttachStdin":true,
-		"AttachStdout":true,
-		"AttachStderr":true,
-		"PortSpecs":null,
-		"ExposedPorts":{},
-		"Tty":true,
-		"OpenStdin":true,
-		"StdinOnce":true,
-		"Env":[],
-		"Cmd":"ls",
-		"Image":"%s",
-		"Volumes":{},
-		"WorkingDir":"",
-		"Entrypoint":null,
-		"NetworkDisabled":false,
-		"OnBuild":null}`, unitTestImageID)
-
-	req, err := http.NewRequest("POST", "/containers/create", strings.NewReader(configStr))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	r := httptest.NewRecorder()
-	server.ServeRequest(eng, api.APIVERSION, r, req)
-	assertHttpNotError(r, t)
-	if r.Code != http.StatusCreated {
-		t.Fatalf("%d Created expected, received %d\n", http.StatusCreated, r.Code)
-	}
-
-	var apiRun engine.Env
-	if err := apiRun.Decode(r.Body); err != nil {
-		t.Fatal(err)
-	}
-	containerID := apiRun.Get("Id")
-
-	containerAssertExists(eng, containerID, t)
-
-	c, _ := daemon.Get(containerID)
-	if c.Config.Cpuset != "" {
-		t.Fatalf("Cpuset should have been empty - instead its:" + c.Config.Cpuset)
-	}
-}
 
 func TestPostContainersKill(t *testing.T) {
 	eng := NewTestEngine(t)
@@ -342,7 +27,7 @@ func TestPostContainersKill(t *testing.T) {
 	containerID := createTestContainer(eng,
 		&runconfig.Config{
 			Image:     unitTestImageID,
-			Cmd:       []string{"/bin/cat"},
+			Cmd:       runconfig.NewCommand("/bin/cat"),
 			OpenStdin: true,
 		},
 		t,
@@ -379,7 +64,7 @@ func TestPostContainersRestart(t *testing.T) {
 	containerID := createTestContainer(eng,
 		&runconfig.Config{
 			Image:     unitTestImageID,
-			Cmd:       []string{"/bin/top"},
+			Cmd:       runconfig.NewCommand("/bin/top"),
 			OpenStdin: true,
 		},
 		t,
@@ -423,7 +108,7 @@ func TestPostContainersStart(t *testing.T) {
 		eng,
 		&runconfig.Config{
 			Image:     unitTestImageID,
-			Cmd:       []string{"/bin/cat"},
+			Cmd:       runconfig.NewCommand("/bin/cat"),
 			OpenStdin: true,
 		},
 		t,
@@ -473,7 +158,7 @@ func TestPostContainersStop(t *testing.T) {
 	containerID := createTestContainer(eng,
 		&runconfig.Config{
 			Image:     unitTestImageID,
-			Cmd:       []string{"/bin/top"},
+			Cmd:       runconfig.NewCommand("/bin/top"),
 			OpenStdin: true,
 		},
 		t,
@@ -525,7 +210,7 @@ func TestPostContainersWait(t *testing.T) {
 	containerID := createTestContainer(eng,
 		&runconfig.Config{
 			Image:     unitTestImageID,
-			Cmd:       []string{"/bin/sleep", "1"},
+			Cmd:       runconfig.NewCommand("/bin/sleep", "1"),
 			OpenStdin: true,
 		},
 		t,
@@ -561,7 +246,7 @@ func TestPostContainersAttach(t *testing.T) {
 	containerID := createTestContainer(eng,
 		&runconfig.Config{
 			Image:     unitTestImageID,
-			Cmd:       []string{"/bin/cat"},
+			Cmd:       runconfig.NewCommand("/bin/cat"),
 			OpenStdin: true,
 		},
 		t,
@@ -637,7 +322,7 @@ func TestPostContainersAttachStderr(t *testing.T) {
 	containerID := createTestContainer(eng,
 		&runconfig.Config{
 			Image:     unitTestImageID,
-			Cmd:       []string{"/bin/sh", "-c", "/bin/cat >&2"},
+			Cmd:       runconfig.NewCommand("/bin/sh", "-c", "/bin/cat >&2"),
 			OpenStdin: true,
 		},
 		t,
@@ -749,7 +434,7 @@ func TestGetEnabledCors(t *testing.T) {
 		t.Errorf("Expected header Access-Control-Allow-Headers to be \"Origin, X-Requested-With, Content-Type, Accept, X-Registry-Auth\", %s found.", allowHeaders)
 	}
 	if allowMethods != "GET, POST, DELETE, PUT, OPTIONS" {
-		t.Errorf("Expected hearder Access-Control-Allow-Methods to be \"GET, POST, DELETE, PUT, OPTIONS\", %s found.", allowMethods)
+		t.Errorf("Expected header Access-Control-Allow-Methods to be \"GET, POST, DELETE, PUT, OPTIONS\", %s found.", allowMethods)
 	}
 }
 
@@ -761,7 +446,8 @@ func TestDeleteImages(t *testing.T) {
 
 	initialImages := getImages(eng, t, true, "")
 
-	if err := eng.Job("tag", unitTestImageName, "test", "test").Run(); err != nil {
+	d := getDaemon(eng)
+	if err := d.Repositories().Tag("test", "test", unitTestImageName, true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -818,7 +504,7 @@ func TestPostContainersCopy(t *testing.T) {
 	containerID := createTestContainer(eng,
 		&runconfig.Config{
 			Image: unitTestImageID,
-			Cmd:   []string{"touch", "/test.txt"},
+			Cmd:   runconfig.NewCommand("touch", "/test.txt"),
 		},
 		t,
 	)
@@ -932,7 +618,7 @@ func TestConstainersStartChunkedEncodingHostConfig(t *testing.T) {
 	req.Header.Add("Content-Type", "application/json")
 	// This is a cheat to make the http request do chunked encoding
 	// Otherwise (just setting the Content-Encoding to chunked) net/http will overwrite
-	// http://golang.org/src/pkg/net/http/request.go?s=11980:12172
+	// https://golang.org/src/pkg/net/http/request.go?s=11980:12172
 	req.ContentLength = -1
 	server.ServeRequest(eng, api.APIVERSION, r, req)
 	assertHttpNotError(r, t)
@@ -962,7 +648,7 @@ func TestConstainersStartChunkedEncodingHostConfig(t *testing.T) {
 	}
 
 	if c.HostConfig.Binds[0] != "/tmp:/foo" {
-		t.Fatal("Chunked encoding not properly handled, execpted binds to be /tmp:/foo, got:", c.HostConfig.Binds[0])
+		t.Fatal("Chunked encoding not properly handled, expected binds to be /tmp:/foo, got:", c.HostConfig.Binds[0])
 	}
 }
 

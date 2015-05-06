@@ -1,44 +1,10 @@
 package requestdecorator
 
 import (
-	"encoding/base64"
 	"net/http"
 	"strings"
 	"testing"
 )
-
-// The following 2 functions are here for 1.3.3 support
-// After we drop 1.3.3 support we can use the functions supported
-// in go v1.4.0 +
-// BasicAuth returns the username and password provided in the request's
-// Authorization header, if the request uses HTTP Basic Authentication.
-// See RFC 2617, Section 2.
-func basicAuth(r *http.Request) (username, password string, ok bool) {
-	auth := r.Header.Get("Authorization")
-	if auth == "" {
-		return
-	}
-	return parseBasicAuth(auth)
-}
-
-// parseBasicAuth parses an HTTP Basic Authentication string.
-// "Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==" returns ("Aladdin", "open sesame", true).
-func parseBasicAuth(auth string) (username, password string, ok bool) {
-	const prefix = "Basic "
-	if !strings.HasPrefix(auth, prefix) {
-		return
-	}
-	c, err := base64.StdEncoding.DecodeString(auth[len(prefix):])
-	if err != nil {
-		return
-	}
-	cs := string(c)
-	s := strings.IndexByte(cs, ':')
-	if s < 0 {
-		return
-	}
-	return cs[:s], cs[s+1:], true
-}
 
 func TestUAVersionInfo(t *testing.T) {
 	uavi := NewUAVersionInfo("foo", "bar")
@@ -147,7 +113,7 @@ func TestAuthDecorator(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	username, password, ok := basicAuth(reqDecorated)
+	username, password, ok := reqDecorated.BasicAuth()
 	if !ok {
 		t.Fatalf("Cannot retrieve basic auth info from request")
 	}
@@ -180,8 +146,8 @@ func TestRequestFactory(t *testing.T) {
 
 	requestFactory := NewRequestFactory(ad, uad)
 
-	if dlen := len(requestFactory.GetDecorators()); dlen != 2 {
-		t.Fatalf("Expected to have two decorators, got %d", dlen)
+	if l := len(requestFactory.GetDecorators()); l != 2 {
+		t.Fatalf("Expected to have two decorators, got %d", l)
 	}
 
 	req, err := requestFactory.NewRequest("GET", "/test", strings.NewReader("test"))
@@ -189,7 +155,7 @@ func TestRequestFactory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	username, password, ok := basicAuth(req)
+	username, password, ok := req.BasicAuth()
 	if !ok {
 		t.Fatalf("Cannot retrieve basic auth info from request")
 	}
@@ -209,8 +175,8 @@ func TestRequestFactoryNewRequestWithDecorators(t *testing.T) {
 
 	requestFactory := NewRequestFactory(ad)
 
-	if dlen := len(requestFactory.GetDecorators()); dlen != 1 {
-		t.Fatalf("Expected to have one decorators, got %d", dlen)
+	if l := len(requestFactory.GetDecorators()); l != 1 {
+		t.Fatalf("Expected to have one decorators, got %d", l)
 	}
 
 	ad2 := NewAuthDecorator("test2", "password2")
@@ -220,7 +186,7 @@ func TestRequestFactoryNewRequestWithDecorators(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	username, password, ok := basicAuth(req)
+	username, password, ok := req.BasicAuth()
 	if !ok {
 		t.Fatalf("Cannot retrieve basic auth info from request")
 	}
@@ -235,15 +201,15 @@ func TestRequestFactoryNewRequestWithDecorators(t *testing.T) {
 func TestRequestFactoryAddDecorator(t *testing.T) {
 	requestFactory := NewRequestFactory()
 
-	if dlen := len(requestFactory.GetDecorators()); dlen != 0 {
-		t.Fatalf("Expected to have zero decorators, got %d", dlen)
+	if l := len(requestFactory.GetDecorators()); l != 0 {
+		t.Fatalf("Expected to have zero decorators, got %d", l)
 	}
 
 	ad := NewAuthDecorator("test", "password")
 	requestFactory.AddDecorator(ad)
 
-	if dlen := len(requestFactory.GetDecorators()); dlen != 1 {
-		t.Fatalf("Expected to have one decorators, got %d", dlen)
+	if l := len(requestFactory.GetDecorators()); l != 1 {
+		t.Fatalf("Expected to have one decorators, got %d", l)
 	}
 }
 

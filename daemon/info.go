@@ -6,8 +6,9 @@ import (
 	"time"
 
 	"github.com/Sirupsen/logrus"
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/autogen/dockerversion"
-	"github.com/docker/docker/engine"
+	"github.com/docker/docker/pkg/fileutils"
 	"github.com/docker/docker/pkg/parsers/kernel"
 	"github.com/docker/docker/pkg/parsers/operatingsystem"
 	"github.com/docker/docker/pkg/system"
@@ -15,7 +16,7 @@ import (
 	"github.com/docker/docker/utils"
 )
 
-func (daemon *Daemon) CmdInfo(job *engine.Job) error {
+func (daemon *Daemon) SystemInfo() (*types.Info, error) {
 	images, _ := daemon.Graph().Map()
 	var imgcount int
 	if images == nil {
@@ -32,11 +33,15 @@ func (daemon *Daemon) CmdInfo(job *engine.Job) error {
 	if s, err := operatingsystem.GetOperatingSystem(); err == nil {
 		operatingSystem = s
 	}
-	if inContainer, err := operatingsystem.IsContainerized(); err != nil {
-		logrus.Errorf("Could not determine if daemon is containerized: %v", err)
-		operatingSystem += " (error determining if containerized)"
-	} else if inContainer {
-		operatingSystem += " (containerized)"
+
+	// Don't do containerized check on Windows
+	if runtime.GOOS != "windows" {
+		if inContainer, err := operatingsystem.IsContainerized(); err != nil {
+			logrus.Errorf("Could not determine if daemon is containerized: %v", err)
+			operatingSystem += " (error determining if containerized)"
+		} else if inContainer {
+			operatingSystem += " (containerized)"
+		}
 	}
 
 	meminfo, err := system.ReadMemInfo()
@@ -51,47 +56,47 @@ func (daemon *Daemon) CmdInfo(job *engine.Job) error {
 		initPath = daemon.SystemInitPath()
 	}
 
-	v := &engine.Env{}
-	v.SetJson("ID", daemon.ID)
-	v.SetInt("Containers", len(daemon.List()))
-	v.SetInt("Images", imgcount)
-	v.Set("Driver", daemon.GraphDriver().String())
-	v.SetJson("DriverStatus", daemon.GraphDriver().Status())
-	v.SetBool("MemoryLimit", daemon.SystemConfig().MemoryLimit)
-	v.SetBool("SwapLimit", daemon.SystemConfig().SwapLimit)
-	v.SetBool("IPv4Forwarding", !daemon.SystemConfig().IPv4ForwardingDisabled)
-	v.SetBool("Debug", os.Getenv("DEBUG") != "")
-	v.SetInt("NFd", utils.GetTotalUsedFds())
-	v.SetInt("NGoroutines", runtime.NumGoroutine())
-	v.Set("SystemTime", time.Now().Format(time.RFC3339Nano))
-	v.Set("ExecutionDriver", daemon.ExecutionDriver().Name())
-	v.Set("LoggingDriver", daemon.defaultLogConfig.Type)
-	v.SetInt("NEventsListener", daemon.EventsService.SubscribersCount())
-	v.Set("KernelVersion", kernelVersion)
-	v.Set("OperatingSystem", operatingSystem)
-	v.Set("IndexServerAddress", registry.IndexServerAddress())
-	v.SetJson("RegistryConfig", daemon.RegistryService.Config)
-	v.Set("InitSha1", dockerversion.INITSHA1)
-	v.Set("InitPath", initPath)
-	v.SetInt("NCPU", runtime.NumCPU())
-	v.SetInt64("MemTotal", meminfo.MemTotal)
-	v.Set("DockerRootDir", daemon.Config().Root)
-	if httpProxy := os.Getenv("http_proxy"); httpProxy != "" {
-		v.Set("HttpProxy", httpProxy)
-	}
-	if httpsProxy := os.Getenv("https_proxy"); httpsProxy != "" {
-		v.Set("HttpsProxy", httpsProxy)
-	}
-	if noProxy := os.Getenv("no_proxy"); noProxy != "" {
-		v.Set("NoProxy", noProxy)
+	v := &types.Info{
+		ID:                 daemon.ID,
+		Containers:         len(daemon.List()),
+		Images:             imgcount,
+		Driver:             daemon.GraphDriver().String(),
+		DriverStatus:       daemon.GraphDriver().Status(),
+		MemoryLimit:        daemon.SystemConfig().MemoryLimit,
+		SwapLimit:          daemon.SystemConfig().SwapLimit,
+		CpuCfsQuota:        daemon.SystemConfig().CpuCfsQuota,
+		IPv4Forwarding:     !daemon.SystemConfig().IPv4ForwardingDisabled,
+		Debug:              os.Getenv("DEBUG") != "",
+		NFd:                fileutils.GetTotalUsedFds(),
+		NGoroutines:        runtime.NumGoroutine(),
+		SystemTime:         time.Now().Format(time.RFC3339Nano),
+		ExecutionDriver:    daemon.ExecutionDriver().Name(),
+		LoggingDriver:      daemon.defaultLogConfig.Type,
+		NEventsListener:    daemon.EventsService.SubscribersCount(),
+		KernelVersion:      kernelVersion,
+		OperatingSystem:    operatingSystem,
+		IndexServerAddress: registry.IndexServerAddress(),
+		RegistryConfig:     daemon.RegistryService.Config,
+		InitSha1:           dockerversion.INITSHA1,
+		InitPath:           initPath,
+		NCPU:               runtime.NumCPU(),
+		MemTotal:           meminfo.MemTotal,
+		DockerRootDir:      daemon.Config().Root,
+		Labels:             daemon.Config().Labels,
 	}
 
+	if httpProxy := os.Getenv("http_proxy"); httpProxy != "" {
+		v.HttpProxy = httpProxy
+	}
+	if httpsProxy := os.Getenv("https_proxy"); httpsProxy != "" {
+		v.HttpsProxy = httpsProxy
+	}
+	if noProxy := os.Getenv("no_proxy"); noProxy != "" {
+		v.NoProxy = noProxy
+	}
 	if hostname, err := os.Hostname(); err == nil {
-		v.SetJson("Name", hostname)
+		v.Name = hostname
 	}
-	v.SetList("Labels", daemon.Config().Labels)
-	if _, err := v.WriteTo(job.Stdout); err != nil {
-		return err
-	}
-	return nil
+
+	return v, nil
 }

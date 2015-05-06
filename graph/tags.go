@@ -18,6 +18,7 @@ import (
 	"github.com/docker/docker/pkg/parsers"
 	"github.com/docker/docker/pkg/stringid"
 	"github.com/docker/docker/registry"
+	"github.com/docker/docker/trust"
 	"github.com/docker/docker/utils"
 	"github.com/docker/libtrust"
 )
@@ -42,6 +43,7 @@ type TagStore struct {
 	pushingPool     map[string]chan struct{}
 	registryService *registry.Service
 	eventsService   *events.Events
+	trustService    *trust.TrustStore
 }
 
 type Repository map[string]string
@@ -64,7 +66,15 @@ func (r Repository) Contains(u Repository) bool {
 	return true
 }
 
-func NewTagStore(path string, graph *Graph, key libtrust.PrivateKey, registryService *registry.Service, eventsService *events.Events) (*TagStore, error) {
+type TagStoreConfig struct {
+	Graph    *Graph
+	Key      libtrust.PrivateKey
+	Registry *registry.Service
+	Events   *events.Events
+	Trust    *trust.TrustStore
+}
+
+func NewTagStore(path string, cfg *TagStoreConfig) (*TagStore, error) {
 	abspath, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
@@ -72,13 +82,14 @@ func NewTagStore(path string, graph *Graph, key libtrust.PrivateKey, registrySer
 
 	store := &TagStore{
 		path:            abspath,
-		graph:           graph,
-		trustKey:        key,
+		graph:           cfg.Graph,
+		trustKey:        cfg.Key,
 		Repositories:    make(map[string]Repository),
 		pullingPool:     make(map[string]chan struct{}),
 		pushingPool:     make(map[string]chan struct{}),
-		registryService: registryService,
-		eventsService:   eventsService,
+		registryService: cfg.Registry,
+		eventsService:   cfg.Events,
+		trustService:    cfg.Trust,
 	}
 	// Load the json file if it exists, otherwise create it.
 	if err := store.reload(); os.IsNotExist(err) {
@@ -104,11 +115,12 @@ func (store *TagStore) save() error {
 }
 
 func (store *TagStore) reload() error {
-	jsonData, err := ioutil.ReadFile(store.path)
+	f, err := os.Open(store.path)
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(jsonData, store); err != nil {
+	defer f.Close()
+	if err := json.NewDecoder(f).Decode(&store); err != nil {
 		return err
 	}
 	return nil
@@ -224,7 +236,7 @@ func (store *TagStore) Delete(repoName, ref string) (bool, error) {
 	return deleted, store.save()
 }
 
-func (store *TagStore) Set(repoName, tag, imageName string, force bool) error {
+func (store *TagStore) Tag(repoName, tag, imageName string, force bool) error {
 	return store.SetLoad(repoName, tag, imageName, force, nil)
 }
 

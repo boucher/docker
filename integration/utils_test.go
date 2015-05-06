@@ -17,7 +17,6 @@ import (
 	"github.com/docker/docker/vendor/src/code.google.com/p/go/src/pkg/archive/tar"
 
 	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/builtins"
 	"github.com/docker/docker/daemon"
 	"github.com/docker/docker/daemon/networkdriver/bridge"
 	"github.com/docker/docker/engine"
@@ -44,16 +43,11 @@ func mkDaemon(f Fataler) *daemon.Daemon {
 }
 
 func createNamedTestContainer(eng *engine.Engine, config *runconfig.Config, f Fataler, name string) (shortId string) {
-	job := eng.Job("create", name)
-	if err := job.ImportEnv(config); err != nil {
+	containerId, _, err := getDaemon(eng).ContainerCreate(name, config, &runconfig.HostConfig{})
+	if err != nil {
 		f.Fatal(err)
 	}
-	var outputBuffer = bytes.NewBuffer(nil)
-	job.Stdout.Add(outputBuffer)
-	if err := job.Run(); err != nil {
-		f.Fatal(err)
-	}
-	return engine.Tail(outputBuffer, 1)
+	return containerId
 }
 
 func createTestContainer(eng *engine.Engine, config *runconfig.Config, f Fataler) (shortId string) {
@@ -61,8 +55,7 @@ func createTestContainer(eng *engine.Engine, config *runconfig.Config, f Fataler
 }
 
 func startContainer(eng *engine.Engine, id string, t Fataler) {
-	job := eng.Job("start", id)
-	if err := job.Run(); err != nil {
+	if err := getDaemon(eng).ContainerStart(id, &runconfig.HostConfig{}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -105,7 +98,7 @@ func containerWaitTimeout(eng *engine.Engine, id string, t Fataler) error {
 }
 
 func containerKill(eng *engine.Engine, id string, t Fataler) {
-	if err := eng.Job("kill", id).Run(); err != nil {
+	if err := getDaemon(eng).ContainerKill(id, 0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -176,10 +169,6 @@ func newTestEngine(t Fataler, autorestart bool, root string) *engine.Engine {
 
 	eng := engine.New()
 	eng.Logging = false
-	// Load default plugins
-	if err := builtins.Register(eng); err != nil {
-		t.Fatal(err)
-	}
 
 	// (This is manually copied and modified from main() until we have a more generic plugin system)
 	cfg := &daemon.Config{

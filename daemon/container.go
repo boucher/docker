@@ -22,6 +22,7 @@ import (
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/daemon/execdriver"
 	"github.com/docker/docker/daemon/logger"
+	"github.com/docker/docker/daemon/logger/journald"
 	"github.com/docker/docker/daemon/logger/jsonfilelog"
 	"github.com/docker/docker/daemon/logger/syslog"
 	"github.com/docker/docker/daemon/network"
@@ -149,8 +150,7 @@ func (container *Container) toDisk() error {
 		return err
 	}
 
-	err = ioutil.WriteFile(pth, data, 0666)
-	if err != nil {
+	if err := ioutil.WriteFile(pth, data, 0666); err != nil {
 		return err
 	}
 
@@ -179,11 +179,13 @@ func (container *Container) readHostConfig() error {
 		return nil
 	}
 
-	data, err := ioutil.ReadFile(pth)
+	f, err := os.Open(pth)
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(data, container.hostConfig)
+	defer f.Close()
+
+	return json.NewDecoder(f).Decode(&container.hostConfig)
 }
 
 func (container *Container) WriteHostConfig() error {
@@ -209,12 +211,37 @@ func (container *Container) LogEvent(action string) {
 	)
 }
 
-func (container *Container) getResourcePath(path string) (string, error) {
+// Evaluates `path` in the scope of the container's basefs, with proper path
+// sanitisation. Symlinks are all scoped to the basefs of the container, as
+// though the container's basefs was `/`.
+//
+// The basefs of a container is the host-facing path which is bind-mounted as
+// `/` inside the container. This method is essentially used to access a
+// particular path inside the container as though you were a process in that
+// container.
+//
+// NOTE: The returned path is *only* safely scoped inside the container's basefs
+//       if no component of the returned path changes (such as a component
+//       symlinking to a different path) between using this method and using the
+//       path. See symlink.FollowSymlinkInScope for more details.
+func (container *Container) GetResourcePath(path string) (string, error) {
 	cleanPath := filepath.Join("/", path)
 	return symlink.FollowSymlinkInScope(filepath.Join(container.basefs, cleanPath), container.basefs)
 }
 
-func (container *Container) getRootResourcePath(path string) (string, error) {
+// Evaluates `path` in the scope of the container's root, with proper path
+// sanitisation. Symlinks are all scoped to the root of the container, as
+// though the container's root was `/`.
+//
+// The root of a container is the host-facing configuration metadata directory.
+// Only use this method to safely access the container's `container.json` or
+// other metadata files. If in doubt, use container.GetResourcePath.
+//
+// NOTE: The returned path is *only* safely scoped inside the container's root
+//       if no component of the returned path changes (such as a component
+//       symlinking to a different path) between using this method and using the
+//       path. See symlink.FollowSymlinkInScope for more details.
+func (container *Container) GetRootResourcePath(path string) (string, error) {
 	cleanPath := filepath.Join("/", path)
 	return symlink.FollowSymlinkInScope(filepath.Join(container.root, cleanPath), container.root)
 }
@@ -356,6 +383,8 @@ func populateCommand(c *Container, env []string) error {
 		MemorySwap: c.hostConfig.MemorySwap,
 		CpuShares:  c.hostConfig.CpuShares,
 		CpusetCpus: c.hostConfig.CpusetCpus,
+		CpusetMems: c.hostConfig.CpusetMems,
+		CpuQuota:   c.hostConfig.CpuQuota,
 		Rlimits:    rlimits,
 	}
 
@@ -511,7 +540,7 @@ func (streamConfig *StreamConfig) StderrLogPipe() io.ReadCloser {
 }
 
 func (container *Container) buildHostnameFile() error {
-	hostnamePath, err := container.getRootResourcePath("hostname")
+	hostnamePath, err := container.GetRootResourcePath("hostname")
 	if err != nil {
 		return err
 	}
@@ -525,7 +554,7 @@ func (container *Container) buildHostnameFile() error {
 
 func (container *Container) buildHostsFiles(IP string) error {
 
-	hostsPath, err := container.getRootResourcePath("hosts")
+	hostsPath, err := container.GetRootResourcePath("hosts")
 	if err != nil {
 		return err
 	}
@@ -575,9 +604,16 @@ func (container *Container) AllocateNetwork() error {
 	var (
 		err error
 		eng = container.daemon.eng
+		networkSettings *network.Settings
 	)
 
-	networkSettings, err := bridge.Allocate(container.ID, container.Config.MacAddress, "", "")
+	if container.IsCheckpointed() {
+		// FIXME: ipv6 support...
+		networkSettings, err = bridge.Allocate(container.ID, container.Config.MacAddress, container.NetworkSettings.IPAddress, "", true)
+	} else {
+		networkSettings, err = bridge.Allocate(container.ID, container.Config.MacAddress, "", "", false)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -661,7 +697,7 @@ func (container *Container) RestoreNetwork() error {
 	eng := container.daemon.eng
 
 	// Re-allocate the interface with the same IP and MAC address.
-	if _, err := bridge.Allocate(container.ID, container.NetworkSettings.MacAddress, container.NetworkSettings.IPAddress, ""); err != nil {
+	if _, err := bridge.Allocate(container.ID, container.NetworkSettings.MacAddress, container.NetworkSettings.IPAddress, "", true); err != nil {
 		return err
 	}
 
@@ -677,7 +713,11 @@ func (container *Container) RestoreNetwork() error {
 // cleanup releases any network resources allocated to the container along with any rules
 // around how containers are linked together.  It also unmounts the container's root filesystem.
 func (container *Container) cleanup() {
-	container.ReleaseNetwork()
+	if container.IsCheckpointed() {
+		logrus.Debugf("not calling ReleaseNetwork() for checkpointed container %s", container.ID)
+	} else {
+		container.ReleaseNetwork()
+	}
 
 	// Disable all active links
 	if container.activeLinks != nil {
@@ -891,7 +931,7 @@ func (container *Container) Unmount() error {
 }
 
 func (container *Container) logPath(name string) (string, error) {
-	return container.getRootResourcePath(fmt.Sprintf("%s-%s.log", container.ID, name))
+	return container.GetRootResourcePath(fmt.Sprintf("%s-%s.log", container.ID, name))
 }
 
 func (container *Container) ReadLog(name string) (io.Reader, error) {
@@ -903,11 +943,11 @@ func (container *Container) ReadLog(name string) (io.Reader, error) {
 }
 
 func (container *Container) hostConfigPath() (string, error) {
-	return container.getRootResourcePath("hostconfig.json")
+	return container.GetRootResourcePath("hostconfig.json")
 }
 
 func (container *Container) jsonPath() (string, error) {
-	return container.getRootResourcePath("config.json")
+	return container.GetRootResourcePath("config.json")
 }
 
 // This method must be exported to be used from the lxc template
@@ -954,38 +994,76 @@ func (container *Container) GetSize() (int64, int64) {
 	return sizeRw, sizeRootfs
 }
 
+func (container *Container) Checkpoint(opts *libcontainer.CriuOpts) error {
+	return container.daemon.Checkpoint(container, opts)
+}
+
+// XXX Start() does a lot more.  Not sure if we have
+//     to do everything it does.
+func (container *Container) Restore(opts *libcontainer.CriuOpts) error {
+	var err error
+
+	container.Lock()
+	defer container.Unlock()
+
+	defer func() {
+		if err != nil {
+			container.cleanup()
+		}
+	}()
+
+	if err = container.initializeNetworking(); err != nil {
+		return err
+	}
+
+	linkedEnv, err := container.setupLinkedContainers()
+	if err != nil {
+		return err
+	}
+
+	if err = container.setupWorkingDirectory(); err != nil {
+		return err
+	}
+
+	env := container.createDaemonEnvironment(linkedEnv)
+
+	if err = populateCommand(container, env); err != nil {
+		return err
+	}
+
+	return container.waitForRestore(opts)
+}
+
 func (container *Container) Copy(resource string) (io.ReadCloser, error) {
+	container.Lock()
+	defer container.Unlock()
+	var err error
 	if err := container.Mount(); err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			container.Unmount()
+		}
+	}()
 
-	basePath, err := container.getResourcePath(resource)
-	if err != nil {
-		container.Unmount()
+	if err = container.mountVolumes(); err != nil {
+		container.unmountVolumes()
 		return nil, err
 	}
-
-	// Check if this is actually in a volume
-	for _, mnt := range container.VolumeMounts() {
-		if len(mnt.MountToPath) > 0 && strings.HasPrefix(resource, mnt.MountToPath[1:]) {
-			return mnt.Export(resource)
+	defer func() {
+		if err != nil {
+			container.unmountVolumes()
 		}
-	}
+	}()
 
-	// Check if this is a special one (resolv.conf, hostname, ..)
-	if resource == "etc/resolv.conf" {
-		basePath = container.ResolvConfPath
-	}
-	if resource == "etc/hostname" {
-		basePath = container.HostnamePath
-	}
-	if resource == "etc/hosts" {
-		basePath = container.HostsPath
+	basePath, err := container.GetResourcePath(resource)
+	if err != nil {
+		return nil, err
 	}
 
 	stat, err := os.Stat(basePath)
 	if err != nil {
-		container.Unmount()
 		return nil, err
 	}
 	var filter []string
@@ -1003,11 +1081,12 @@ func (container *Container) Copy(resource string) (io.ReadCloser, error) {
 		IncludeFiles: filter,
 	})
 	if err != nil {
-		container.Unmount()
 		return nil, err
 	}
+
 	return ioutils.NewReadCloserWrapper(archive, func() error {
 			err := archive.Close()
+			container.unmountVolumes()
 			container.Unmount()
 			return err
 		}),
@@ -1018,14 +1097,6 @@ func (container *Container) Copy(resource string) (io.ReadCloser, error) {
 func (container *Container) Exposes(p nat.Port) bool {
 	_, exists := container.Config.ExposedPorts[p]
 	return exists
-}
-
-func (container *Container) GetPtyMaster() (libcontainer.Console, error) {
-	ttyConsole, ok := container.command.ProcessConfig.Terminal.(execdriver.TtyTerminal)
-	if !ok {
-		return nil, ErrNoTTY
-	}
-	return ttyConsole.Master(), nil
 }
 
 func (container *Container) HostConfig() *runconfig.HostConfig {
@@ -1063,7 +1134,7 @@ func (container *Container) setupContainerDns() error {
 			updatedResolvConf, modified := resolvconf.FilterResolvDns(latestResolvConf, container.daemon.config.Bridge.EnableIPv6)
 			if modified {
 				// changes have occurred during resolv.conf localhost cleanup: generate an updated hash
-				newHash, err := utils.HashData(bytes.NewReader(updatedResolvConf))
+				newHash, err := ioutils.HashData(bytes.NewReader(updatedResolvConf))
 				if err != nil {
 					return err
 				}
@@ -1088,7 +1159,7 @@ func (container *Container) setupContainerDns() error {
 	if err != nil {
 		return err
 	}
-	container.ResolvConfPath, err = container.getRootResourcePath("resolv.conf")
+	container.ResolvConfPath, err = container.GetRootResourcePath("resolv.conf")
 	if err != nil {
 		return err
 	}
@@ -1118,7 +1189,7 @@ func (container *Container) setupContainerDns() error {
 	}
 	//get a sha256 hash of the resolv conf at this point so we can check
 	//for changes when the host resolv.conf changes (e.g. network update)
-	resolvHash, err := utils.HashData(bytes.NewReader(resolvConf))
+	resolvHash, err := ioutils.HashData(bytes.NewReader(resolvConf))
 	if err != nil {
 		return err
 	}
@@ -1150,7 +1221,7 @@ func (container *Container) updateResolvConf(updatedResolvConf []byte, newResolv
 	if err != nil {
 		return err
 	}
-	curHash, err := utils.HashData(bytes.NewReader(resolvBytes))
+	curHash, err := ioutils.HashData(bytes.NewReader(resolvBytes))
 	if err != nil {
 		return err
 	}
@@ -1249,7 +1320,7 @@ func (container *Container) initializeNetworking() error {
 			return err
 		}
 
-		hostsPath, err := container.getRootResourcePath("hosts")
+		hostsPath, err := container.GetRootResourcePath("hosts")
 		if err != nil {
 			return err
 		}
@@ -1282,13 +1353,13 @@ func (container *Container) initializeNetworking() error {
 
 // Make sure the config is compatible with the current kernel
 func (container *Container) verifyDaemonSettings() {
-	if container.Config.Memory > 0 && !container.daemon.sysInfo.MemoryLimit {
+	if container.hostConfig.Memory > 0 && !container.daemon.sysInfo.MemoryLimit {
 		logrus.Warnf("Your kernel does not support memory limit capabilities. Limitation discarded.")
-		container.Config.Memory = 0
+		container.hostConfig.Memory = 0
 	}
-	if container.Config.Memory > 0 && !container.daemon.sysInfo.SwapLimit {
+	if container.hostConfig.Memory > 0 && container.hostConfig.MemorySwap != -1 && !container.daemon.sysInfo.SwapLimit {
 		logrus.Warnf("Your kernel does not support swap limit capabilities. Limitation discarded.")
-		container.Config.MemorySwap = -1
+		container.hostConfig.MemorySwap = -1
 	}
 	if container.daemon.sysInfo.IPv4ForwardingDisabled {
 		logrus.Warnf("IPv4 forwarding is disabled. Networking will not work")
@@ -1328,7 +1399,7 @@ func (container *Container) setupLinkedContainers() ([]string, error) {
 				linkAlias,
 				child.Config.Env,
 				child.Config.ExposedPorts,
-				daemon.eng)
+			)
 
 			if err != nil {
 				rollback()
@@ -1380,7 +1451,7 @@ func (container *Container) setupWorkingDirectory() error {
 	if container.Config.WorkingDir != "" {
 		container.Config.WorkingDir = path.Clean(container.Config.WorkingDir)
 
-		pth, err := container.getResourcePath(container.Config.WorkingDir)
+		pth, err := container.GetResourcePath(container.Config.WorkingDir)
 		if err != nil {
 			return err
 		}
@@ -1414,6 +1485,7 @@ func (container *Container) startLogging() error {
 		if err != nil {
 			return err
 		}
+		container.LogPath = pth
 
 		dl, err := jsonfilelog.New(pth)
 		if err != nil {
@@ -1422,6 +1494,12 @@ func (container *Container) startLogging() error {
 		l = dl
 	case "syslog":
 		dl, err := syslog.New(container.ID[:12])
+		if err != nil {
+			return err
+		}
+		l = dl
+	case "journald":
+		dl, err := journald.New(container.ID[:12])
 		if err != nil {
 			return err
 		}
@@ -1454,6 +1532,37 @@ func (container *Container) waitForStart() error {
 		return err
 	}
 
+	// FIXME? We should write to the disk after actually starting up
+	// becase StdFds cannot be initialized before
+	container.toDisk()
+
+	return nil
+}
+
+// Like waitForStart() but for restoring a container.
+//
+// XXX Does RestartPolicy apply here?
+func (container *Container) waitForRestore(opts *libcontainer.CriuOpts) error {
+	container.monitor = newContainerMonitor(container, container.hostConfig.RestartPolicy)
+
+	// After calling promise.Go() we'll have two goroutines:
+	// - The current goroutine that will block in the select
+	//   below until restore is done.
+	// - A new goroutine that will restore the container and
+	//   wait for it to exit.
+	select {
+	case <-container.monitor.restoreSignal:
+		if container.ExitCode != 0 {
+			return fmt.Errorf("restore process failed")
+		}
+	case err := <-promise.Go(func() error { return container.monitor.Restore(opts) }):
+		return err
+	}
+
+	// FIXME? We should write to the disk after actually starting up
+	// becase StdFds cannot be initialized before
+	container.toDisk()
+
 	return nil
 }
 
@@ -1464,7 +1573,8 @@ func (container *Container) allocatePort(eng *engine.Engine, port nat.Port, bind
 	}
 
 	for i := 0; i < len(binding); i++ {
-		b, err := bridge.AllocatePort(container.ID, port, binding[i])
+		b, err := bridge.AllocatePort(container.ID, port, binding[i], container.IsCheckpointed())
+
 		if err != nil {
 			return err
 		}
@@ -1512,6 +1622,9 @@ func (container *Container) getNetworkedContainer() (*Container, error) {
 		nc, err := container.daemon.Get(parts[1])
 		if err != nil {
 			return nil, err
+		}
+		if container == nc {
+			return nil, fmt.Errorf("cannot join own network")
 		}
 		if !nc.IsRunning() {
 			return nil, fmt.Errorf("cannot join network of a non running container: %s", parts[1])

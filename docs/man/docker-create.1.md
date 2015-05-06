@@ -13,6 +13,8 @@ docker-create - Create a new container
 [**--cap-drop**[=*[]*]]
 [**--cidfile**[=*CIDFILE*]]
 [**--cpuset-cpus**[=*CPUSET-CPUS*]]
+[**--cpuset-mems**[=*CPUSET-MEMS*]]
+[**--cpu-quota**[=*0*]]
 [**--device**[=*[]*]]
 [**--dns-search**[=*[]*]]
 [**--dns**[=*[]*]]
@@ -74,6 +76,16 @@ IMAGE [COMMAND] [ARG...]
 **--cpuset-cpus**=""
    CPUs in which to allow execution (0-3, 0,1)
 
+**--cpuset-mems**=""
+   Memory nodes (MEMs) in which to allow execution (0-3, 0,1). Only effective on NUMA systems.
+
+   If you have four memory nodes on your system (0-3), use `--cpuset-mems=0,1`
+then processes in your Docker container will only use memory from the first
+two memory nodes.
+
+**-cpu-quota**=0
+   Limit the CPU CFS (Completely Fair Scheduler) quota
+
 **--device**=[]
    Add a host device to the container (e.g. --device=/dev/sdc:/dev/xvdc:rwm)
 
@@ -121,7 +133,7 @@ IMAGE [COMMAND] [ARG...]
 **--lxc-conf**=[]
    (lxc exec-driver only) Add custom lxc options --lxc-conf="lxc.cgroup.cpuset.cpus = 0,1"
 
-**--log-driver**="|*json-file*|*syslog*|*none*"
+**--log-driver**="|*json-file*|*syslog*|*journald*|*none*"
   Logging driver for container. Default is defined by daemon `--log-driver` flag.
   **Warning**: `docker logs` command works only for `json-file` logging driver.
 

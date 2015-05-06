@@ -9,7 +9,6 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/pkg/promise"
 	"github.com/docker/docker/runconfig"
-	"github.com/docker/docker/utils"
 )
 
 // CmdExec runs a command in a running container.
@@ -21,7 +20,7 @@ func (cli *DockerCli) CmdExec(args ...string) error {
 	execConfig, err := runconfig.ParseExec(cmd, args)
 	// just in case the ParseExec does not exit
 	if execConfig.Container == "" || err != nil {
-		return &utils.StatusError{StatusCode: 1}
+		return StatusError{StatusCode: 1}
 	}
 
 	stream, _, err := cli.call("POST", "/containers/"+execConfig.Container+"/exec", execConfig, nil)
@@ -33,9 +32,6 @@ func (cli *DockerCli) CmdExec(args ...string) error {
 	if err := json.NewDecoder(stream).Decode(&response); err != nil {
 		return err
 	}
-	for _, warning := range response.Warnings {
-		fmt.Fprintf(cli.err, "WARNING: %s\n", warning)
-	}
 
 	execID := response.ID
 
@@ -44,12 +40,18 @@ func (cli *DockerCli) CmdExec(args ...string) error {
 		return nil
 	}
 
+	//Temp struct for execStart so that we don't need to transfer all the execConfig
+	execStartCheck := &types.ExecStartCheck{
+		Detach: execConfig.Detach,
+		Tty:    execConfig.Tty,
+	}
+
 	if !execConfig.Detach {
 		if err := cli.CheckTtyInput(execConfig.AttachStdin, execConfig.Tty); err != nil {
 			return err
 		}
 	} else {
-		if _, _, err := readBody(cli.call("POST", "/exec/"+execID+"/start", execConfig, nil)); err != nil {
+		if _, _, err := readBody(cli.call("POST", "/exec/"+execID+"/start", execStartCheck, nil)); err != nil {
 			return err
 		}
 		// For now don't print this - wait for when we support exec wait()
@@ -122,7 +124,7 @@ func (cli *DockerCli) CmdExec(args ...string) error {
 	}
 
 	if status != 0 {
-		return &utils.StatusError{StatusCode: status}
+		return StatusError{StatusCode: status}
 	}
 
 	return nil

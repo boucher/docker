@@ -18,10 +18,10 @@ import (
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/daemon/execdriver"
+	"github.com/docker/docker/pkg/stringutils"
 	sysinfo "github.com/docker/docker/pkg/system"
 	"github.com/docker/docker/pkg/term"
 	"github.com/docker/docker/pkg/version"
-	"github.com/docker/docker/utils"
 	"github.com/docker/libcontainer"
 	"github.com/docker/libcontainer/cgroups"
 	"github.com/docker/libcontainer/configs"
@@ -85,16 +85,21 @@ func (d *driver) Run(c *execdriver.Command, pipes *execdriver.Pipes, startCallba
 		dataPath = d.containerDir(c.ID)
 	)
 
+	container, err := d.createContainer(c)
+	if err != nil {
+		return execdriver.ExitStatus{ExitCode: -1}, err
+	}
+
 	if c.ProcessConfig.Tty {
 		term, err = NewTtyConsole(&c.ProcessConfig, pipes)
 	} else {
 		term, err = execdriver.NewStdConsole(&c.ProcessConfig, pipes)
 	}
-	c.ProcessConfig.Terminal = term
-	container, err := d.createContainer(c)
 	if err != nil {
 		return execdriver.ExitStatus{ExitCode: -1}, err
 	}
+	c.ProcessConfig.Terminal = term
+
 	d.Lock()
 	d.activeContainers[c.ID] = &activeContainer{
 		container: container,
@@ -187,7 +192,7 @@ func (d *driver) Run(c *execdriver.Command, pipes *execdriver.Pipes, startCallba
 		// without exec in go we have to do this horrible shell hack...
 		shellString :=
 			"mount --make-rslave /; exec " +
-				utils.ShellQuoteArguments(params)
+				stringutils.ShellQuoteArguments(params)
 
 		params = []string{
 			"unshare", "-m", "--", "/bin/sh", "-c", shellString,
@@ -486,6 +491,14 @@ func (d *driver) Unpause(c *execdriver.Command) error {
 	}
 
 	return err
+}
+
+func (d *driver) Checkpoint(c *execdriver.Command, opts *libcontainer.CriuOpts) error {
+	return fmt.Errorf("Checkpointing lxc containers not supported yet\n")
+}
+
+func (d *driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback, opts *libcontainer.CriuOpts) (execdriver.ExitStatus, error) {
+	return execdriver.ExitStatus{ExitCode: 0}, fmt.Errorf("Restoring lxc containers not supported yet\n")
 }
 
 func (d *driver) Terminate(c *execdriver.Command) error {

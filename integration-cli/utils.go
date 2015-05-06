@@ -143,6 +143,7 @@ func runCommandPipelineWithOutput(cmds ...*exec.Cmd) (output string, exitCode in
 		if i > 0 {
 			prevCmd := cmds[i-1]
 			cmd.Stdin, err = prevCmd.StdoutPipe()
+
 			if err != nil {
 				return "", 0, fmt.Errorf("cannot set stdout pipe for %s: %v", cmd.Path, err)
 			}
@@ -167,13 +168,8 @@ func runCommandPipelineWithOutput(cmds ...*exec.Cmd) (output string, exitCode in
 	return runCommandWithOutput(cmds[len(cmds)-1])
 }
 
-func logDone(message string) {
-	fmt.Printf("[PASSED]: %.69s\n", message)
-}
-
 func unmarshalJSON(data []byte, result interface{}) error {
-	err := json.Unmarshal(data, result)
-	if err != nil {
+	if err := json.Unmarshal(data, result); err != nil {
 		return err
 	}
 
@@ -213,7 +209,16 @@ func waitInspect(name, expr, expected string, timeout int) error {
 		cmd := exec.Command(dockerBinary, "inspect", "-f", expr, name)
 		out, _, err := runCommandWithOutput(cmd)
 		if err != nil {
-			return fmt.Errorf("error executing docker inspect: %v", err)
+			if !strings.Contains(out, "No such") {
+				return fmt.Errorf("error executing docker inspect: %v\n%s", err, out)
+			}
+			select {
+			case <-after:
+				return err
+			default:
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
 		}
 
 		out = strings.TrimSpace(out)

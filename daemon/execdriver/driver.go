@@ -22,6 +22,7 @@ import (
 // Context is a generic key value pair that allows
 // arbatrary data to be sent
 type Context map[string]string
+type RestoreCallback func(*ProcessConfig, int)
 
 var (
 	ErrNotRunning              = errors.New("Container is not running")
@@ -66,6 +67,8 @@ type Driver interface {
 	Kill(c *Command, sig int) error
 	Pause(c *Command) error
 	Unpause(c *Command) error
+	Checkpoint(c *Command, opts *libcontainer.CriuOpts) error
+	Restore(c *Command, pipes *Pipes, restoreCallback RestoreCallback, opts *libcontainer.CriuOpts) (ExitStatus, error)
 	Name() string                                 // Driver name
 	Info(id string) Info                          // "temporary" hack (until we move state from core to plugins)
 	GetPidsForContainer(id string) ([]int, error) // Returns a list of pids for the given container.
@@ -110,6 +113,8 @@ type Resources struct {
 	MemorySwap int64            `json:"memory_swap"`
 	CpuShares  int64            `json:"cpu_shares"`
 	CpusetCpus string           `json:"cpuset_cpus"`
+	CpusetMems string           `json:"cpuset_mems"`
+	CpuQuota   int64            `json:"cpu_quota"`
 	Rlimits    []*ulimit.Rlimit `json:"rlimits"`
 }
 
@@ -204,6 +209,8 @@ func SetupCgroups(container *configs.Config, c *Command) error {
 		container.Cgroups.MemoryReservation = c.Resources.Memory
 		container.Cgroups.MemorySwap = c.Resources.MemorySwap
 		container.Cgroups.CpusetCpus = c.Resources.CpusetCpus
+		container.Cgroups.CpusetMems = c.Resources.CpusetMems
+		container.Cgroups.CpuQuota = c.Resources.CpuQuota
 	}
 
 	return nil

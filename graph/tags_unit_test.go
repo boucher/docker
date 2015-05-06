@@ -60,7 +60,11 @@ func mkTestTagStore(root string, t *testing.T) *TagStore {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := NewTagStore(path.Join(root, "tags"), graph, nil, nil, events.New())
+	tagCfg := &TagStoreConfig{
+		Graph:  graph,
+		Events: events.New(),
+	}
+	store, err := NewTagStore(path.Join(root, "tags"), tagCfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +76,7 @@ func mkTestTagStore(root string, t *testing.T) *TagStore {
 	if err := graph.Register(img, officialArchive); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Set(testOfficialImageName, "", testOfficialImageID, false); err != nil {
+	if err := store.Tag(testOfficialImageName, "", testOfficialImageID, false); err != nil {
 		t.Fatal(err)
 	}
 	privateArchive, err := fakeTar()
@@ -83,7 +87,7 @@ func mkTestTagStore(root string, t *testing.T) *TagStore {
 	if err := graph.Register(img, privateArchive); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Set(testPrivateImageName, "", testPrivateImageID, false); err != nil {
+	if err := store.Tag(testPrivateImageName, "", testPrivateImageID, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SetDigest(testPrivateImageName, testPrivateImageDigest, testPrivateImageID); err != nil {

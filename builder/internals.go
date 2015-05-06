@@ -22,20 +22,21 @@ import (
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/builder/parser"
 	"github.com/docker/docker/daemon"
+	"github.com/docker/docker/graph"
 	imagepkg "github.com/docker/docker/image"
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/chrootarchive"
+	"github.com/docker/docker/pkg/httputils"
 	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/docker/pkg/jsonmessage"
 	"github.com/docker/docker/pkg/parsers"
 	"github.com/docker/docker/pkg/progressreader"
 	"github.com/docker/docker/pkg/stringid"
-	"github.com/docker/docker/pkg/symlink"
 	"github.com/docker/docker/pkg/system"
 	"github.com/docker/docker/pkg/tarsum"
 	"github.com/docker/docker/pkg/urlutil"
+	"github.com/docker/docker/registry"
 	"github.com/docker/docker/runconfig"
-	"github.com/docker/docker/utils"
 )
 
 func (b *Builder) readContext(context io.Reader) error {
@@ -61,7 +62,7 @@ func (b *Builder) readContext(context io.Reader) error {
 	return nil
 }
 
-func (b *Builder) commit(id string, autoCmd []string, comment string) error {
+func (b *Builder) commit(id string, autoCmd *runconfig.Command, comment string) error {
 	if b.disableCommit {
 		return nil
 	}
@@ -71,8 +72,8 @@ func (b *Builder) commit(id string, autoCmd []string, comment string) error {
 	b.Config.Image = b.image
 	if id == "" {
 		cmd := b.Config.Cmd
-		b.Config.Cmd = []string{"/bin/sh", "-c", "#(nop) " + comment}
-		defer func(cmd []string) { b.Config.Cmd = cmd }(cmd)
+		b.Config.Cmd = runconfig.NewCommand("/bin/sh", "-c", "#(nop) "+comment)
+		defer func(cmd *runconfig.Command) { b.Config.Cmd = cmd }(cmd)
 
 		hit, err := b.probeCache()
 		if err != nil {
@@ -146,8 +147,15 @@ func (b *Builder) runContextCommand(args []string, allowRemote bool, allowDecomp
 	// do the copy (e.g. hash value if cached).  Don't actually do
 	// the copy until we've looked at all src files
 	for _, orig := range args[0 : len(args)-1] {
-		err := calcCopyInfo(b, cmdName, &copyInfos, orig, dest, allowRemote, allowDecompression)
-		if err != nil {
+		if err := calcCopyInfo(
+			b,
+			cmdName,
+			&copyInfos,
+			orig,
+			dest,
+			allowRemote,
+			allowDecompression,
+		); err != nil {
 			return err
 		}
 	}
@@ -182,8 +190,8 @@ func (b *Builder) runContextCommand(args []string, allowRemote bool, allowDecomp
 	}
 
 	cmd := b.Config.Cmd
-	b.Config.Cmd = []string{"/bin/sh", "-c", fmt.Sprintf("#(nop) %s %s in %s", cmdName, srcHash, dest)}
-	defer func(cmd []string) { b.Config.Cmd = cmd }(cmd)
+	b.Config.Cmd = runconfig.NewCommand("/bin/sh", "-c", fmt.Sprintf("#(nop) %s %s in %s", cmdName, srcHash, dest))
+	defer func(cmd *runconfig.Command) { b.Config.Cmd = cmd }(cmd)
 
 	hit, err := b.probeCache()
 	if err != nil {
@@ -250,7 +258,7 @@ func calcCopyInfo(b *Builder, cmdName string, cInfos *[]*copyInfo, origPath stri
 		*cInfos = append(*cInfos, &ci)
 
 		// Initiate the download
-		resp, err := utils.Download(ci.origPath)
+		resp, err := httputils.Download(ci.origPath)
 		if err != nil {
 			return err
 		}
@@ -434,24 +442,29 @@ func (b *Builder) pullImage(name string) (*imagepkg.Image, error) {
 	if tag == "" {
 		tag = "latest"
 	}
-	job := b.Engine.Job("pull", remote, tag)
+
 	pullRegistryAuth := b.AuthConfig
-	if len(b.AuthConfigFile.Configs) > 0 {
+	if len(b.ConfigFile.AuthConfigs) > 0 {
 		// The request came with a full auth config file, we prefer to use that
 		repoInfo, err := b.Daemon.RegistryService.ResolveRepository(remote)
 		if err != nil {
 			return nil, err
 		}
-		resolvedAuth := b.AuthConfigFile.ResolveAuthConfig(repoInfo.Index)
+		resolvedAuth := registry.ResolveAuthConfig(b.ConfigFile, repoInfo.Index)
 		pullRegistryAuth = &resolvedAuth
 	}
-	job.SetenvBool("json", b.StreamFormatter.Json())
-	job.SetenvBool("parallel", true)
-	job.SetenvJson("authConfig", pullRegistryAuth)
-	job.Stdout.Add(ioutils.NopWriteCloser(b.OutOld))
-	if err := job.Run(); err != nil {
+
+	imagePullConfig := &graph.ImagePullConfig{
+		Parallel:   true,
+		AuthConfig: pullRegistryAuth,
+		OutStream:  ioutils.NopWriteCloser(b.OutOld),
+		Json:       b.StreamFormatter.Json(),
+	}
+
+	if err := b.Daemon.Repositories().Pull(remote, tag, imagePullConfig); err != nil {
 		return nil, err
 	}
+
 	image, err := b.Daemon.Repositories().LookupImage(name)
 	if err != nil {
 		return nil, err
@@ -476,7 +489,7 @@ func (b *Builder) processImageFrom(img *imagepkg.Image) error {
 		fmt.Fprintf(b.ErrStream, "# Executing %d build triggers\n", nTriggers)
 	}
 
-	// Copy the ONBUILD triggers, and remove them from the config, since the config will be commited.
+	// Copy the ONBUILD triggers, and remove them from the config, since the config will be committed.
 	onBuildTriggers := b.Config.OnBuild
 	b.Config.OnBuild = []string{}
 
@@ -540,7 +553,9 @@ func (b *Builder) create() (*daemon.Container, error) {
 
 	hostConfig := &runconfig.HostConfig{
 		CpuShares:  b.cpuShares,
+		CpuQuota:   b.cpuQuota,
 		CpusetCpus: b.cpuSetCpus,
+		CpusetMems: b.cpuSetMems,
 		Memory:     b.memory,
 		MemorySwap: b.memorySwap,
 	}
@@ -559,12 +574,13 @@ func (b *Builder) create() (*daemon.Container, error) {
 	b.TmpContainers[c.ID] = struct{}{}
 	fmt.Fprintf(b.OutStream, " ---> Running in %s\n", stringid.TruncateID(c.ID))
 
-	if len(config.Cmd) > 0 {
+	if config.Cmd.Len() > 0 {
 		// override the entry point that may have been picked up from the base image
-		c.Path = config.Cmd[0]
-		c.Args = config.Cmd[1:]
+		s := config.Cmd.Slice()
+		c.Path = s[0]
+		c.Args = s[1:]
 	} else {
-		config.Cmd = []string{}
+		config.Cmd = runconfig.NewCommand()
 	}
 
 	return c, nil
@@ -601,11 +617,10 @@ func (b *Builder) run(c *daemon.Container) error {
 
 	// Wait for it to finish
 	if ret, _ := c.WaitStop(-1 * time.Second); ret != 0 {
-		err := &jsonmessage.JSONError{
+		return &jsonmessage.JSONError{
 			Message: fmt.Sprintf("The command %v returned a non-zero code: %d", b.Config.Cmd, ret),
 			Code:    ret,
 		}
-		return err
 	}
 
 	return nil
@@ -637,14 +652,12 @@ func (b *Builder) addContext(container *daemon.Container, orig, dest string, dec
 		err        error
 		destExists = true
 		origPath   = path.Join(b.contextPath, orig)
-		destPath   = path.Join(container.RootfsPath(), dest)
+		destPath   string
 	)
 
-	if destPath != container.RootfsPath() {
-		destPath, err = symlink.FollowSymlinkInScope(destPath, container.RootfsPath())
-		if err != nil {
-			return err
-		}
+	destPath, err = container.GetResourcePath(dest)
+	if err != nil {
+		return err
 	}
 
 	// Preserve the trailing '/'

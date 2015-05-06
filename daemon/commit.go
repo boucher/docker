@@ -1,55 +1,18 @@
 package daemon
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-
-	"github.com/docker/docker/engine"
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/runconfig"
 )
 
-func (daemon *Daemon) ContainerCommit(job *engine.Job) error {
-	if len(job.Args) != 1 {
-		return fmt.Errorf("Not enough arguments. Usage: %s CONTAINER\n", job.Name)
-	}
-	name := job.Args[0]
-
-	container, err := daemon.Get(name)
-	if err != nil {
-		return err
-	}
-
-	var (
-		config       = container.Config
-		stdoutBuffer = bytes.NewBuffer(nil)
-		newConfig    runconfig.Config
-	)
-
-	buildConfigJob := daemon.eng.Job("build_config")
-	buildConfigJob.Stdout.Add(stdoutBuffer)
-	buildConfigJob.Setenv("changes", job.Getenv("changes"))
-	// FIXME this should be remove when we remove deprecated config param
-	buildConfigJob.Setenv("config", job.Getenv("config"))
-
-	if err := buildConfigJob.Run(); err != nil {
-		return err
-	}
-	if err := json.NewDecoder(stdoutBuffer).Decode(&newConfig); err != nil {
-		return err
-	}
-
-	if err := runconfig.Merge(&newConfig, config); err != nil {
-		return err
-	}
-
-	img, err := daemon.Commit(container, job.Getenv("repo"), job.Getenv("tag"), job.Getenv("comment"), job.Getenv("author"), job.GetenvBool("pause"), &newConfig)
-	if err != nil {
-		return err
-	}
-	job.Printf("%s\n", img.ID)
-	return nil
+type ContainerCommitConfig struct {
+	Pause   bool
+	Repo    string
+	Tag     string
+	Author  string
+	Comment string
+	Changes []string
+	Config  *runconfig.Config
 }
 
 // Commit creates a new filesystem image from the current state of a container.
@@ -90,7 +53,7 @@ func (daemon *Daemon) Commit(container *Container, repository, tag, comment, aut
 
 	// Register the image if needed
 	if repository != "" {
-		if err := daemon.repositories.Set(repository, tag, img.ID, true); err != nil {
+		if err := daemon.repositories.Tag(repository, tag, img.ID, true); err != nil {
 			return img, err
 		}
 	}

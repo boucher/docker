@@ -1,8 +1,8 @@
-page_title: Network Configuration
+page_title: Network configuration
 page_description: Docker networking
 page_keywords: network, networking, bridge, docker, documentation
 
-# Network Configuration
+# Network configuration
 
 ## TL;DR
 
@@ -41,7 +41,7 @@ can use Docker options and — in advanced cases — raw Linux networking
 commands to tweak, supplement, or entirely replace Docker's default
 networking configuration.
 
-## Quick Guide to the Options
+## Quick guide to the options
 
 Here is a quick list of the networking-related Docker command-line
 options, in case it helps you find the section below that you are
@@ -55,6 +55,12 @@ server when it starts up, and cannot be changed once it is running:
 
  *  `--bip=CIDR` — see
     [Customizing docker0](#docker0)
+
+ *  `--default-gateway=IP_ADDRESS` — see
+    [How Docker networks a container](#container-networking)
+
+ *  `--default-gateway-v6=IP_ADDRESS` — see
+    [IPv6](#ipv6)
 
  *  `--fixed-cidr` — see
     [Customizing docker0](#docker0)
@@ -499,7 +505,9 @@ want to configure `eth0` via Router Advertisements you should set:
 ![](/article-img/ipv6_basic_host_config.svg)
 
 Every new container will get an IPv6 address from the defined subnet. Further
-a default route will be added via the gateway `fe80::1` on `eth0`:
+a default route will be added on `eth0` in the container via the address
+specified by the daemon option `--default-gateway-v6` if present, otherwise
+via `fe80::1`:
 
     docker run -it ubuntu bash -c "ip -6 addr show dev eth0; ip -6 route show"
 
@@ -568,7 +576,7 @@ As soon as the router wants to send an IPv6 packet to the first container it
 will transmit a neighbor solicitation request, asking, who has
 `2001:db8::c009`? But it will get no answer because noone on this subnet has
 this address. The container with this address is hidden behind the Docker host.
-The Docker host has to listen to neighbor solication requests for the container
+The Docker host has to listen to neighbor solicitation requests for the container
 address and send a response that itself is the device that is responsible for
 the address. This is done by a Kernel feature called `NDP Proxy`. You can
 enable it by executing
@@ -593,9 +601,9 @@ You have to execute the `ip -6 neigh add proxy ...` command for every IPv6
 address in your Docker subnet. Unfortunately there is no functionality for
 adding a whole subnet by executing one command.
 
-### Docker IPv6 Cluster
+### Docker IPv6 cluster
 
-#### Switched Network Environment
+#### Switched network environment
 Using routable IPv6 addresses allows you to realize communication between
 containers on different hosts. Let's have a look at a simple Docker IPv6 cluster
 example:
@@ -641,7 +649,7 @@ the Docker subnet on the host, the container IP addresses and the routes on the
 containers. The configuration above the line is up to the user and can be
 adapted to the individual environment.
 
-#### Routed Network Environment
+#### Routed network environment
 
 In a routed network environment you replace the layer 2 switch with a layer 3
 router. Now the hosts just have to know their default gateway (the router) and
@@ -865,12 +873,13 @@ The steps with which Docker configures a container are:
     parameter or generate a random one.
 
 5.  Give the container's `eth0` a new IP address from within the
-    bridge's range of network addresses, and set its default route to
-    the IP address that the Docker host owns on the bridge. The MAC
-    address is generated from the IP address unless otherwise specified.
-    This prevents ARP cache invalidation problems, when a new container
-    comes up with an IP used in the past by another container with another
-    MAC.
+    bridge's range of network addresses. The default route is set to the
+    IP address passed to the Docker daemon using the `--default-gateway`
+    option if specified, otherwise to the IP address that the Docker host
+    owns on the bridge. The MAC address is generated from the IP address
+    unless otherwise specified. This prevents ARP cache invalidation
+    problems, when a new container comes up with an IP used in the past by
+    another container with another MAC.
 
 With these steps complete, the container now possesses an `eth0`
 (virtual) network card and will find itself able to communicate with
@@ -984,7 +993,7 @@ of the right to configure their own networks.  Using `ip netns exec` is
 what let us finish up the configuration without having to take the
 dangerous step of running the container itself with `--privileged=true`.
 
-## Tools and Examples
+## Tools and examples
 
 Before diving into the following sections on custom network topologies,
 you might be interested in glancing at a few external tools or examples

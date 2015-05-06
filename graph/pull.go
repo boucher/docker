@@ -12,7 +12,7 @@ import (
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/distribution/digest"
-	"github.com/docker/docker/engine"
+	"github.com/docker/docker/cliconfig"
 	"github.com/docker/docker/image"
 	"github.com/docker/docker/pkg/progressreader"
 	"github.com/docker/docker/pkg/streamformatter"
@@ -21,37 +21,34 @@ import (
 	"github.com/docker/docker/utils"
 )
 
-func (s *TagStore) CmdPull(job *engine.Job) error {
-	if n := len(job.Args); n != 1 && n != 2 {
-		return fmt.Errorf("Usage: %s IMAGE [TAG|DIGEST]", job.Name)
-	}
+type ImagePullConfig struct {
+	Parallel    bool
+	MetaHeaders map[string][]string
+	AuthConfig  *cliconfig.AuthConfig
+	Json        bool
+	OutStream   io.Writer
+}
 
+func (s *TagStore) Pull(image string, tag string, imagePullConfig *ImagePullConfig) error {
 	var (
-		localName   = job.Args[0]
-		tag         string
-		sf          = streamformatter.NewStreamFormatter(job.GetenvBool("json"))
-		authConfig  = &registry.AuthConfig{}
-		metaHeaders map[string][]string
+		sf = streamformatter.NewStreamFormatter(imagePullConfig.Json)
 	)
 
 	// Resolve the Repository name from fqn to RepositoryInfo
-	repoInfo, err := s.registryService.ResolveRepository(localName)
+	repoInfo, err := s.registryService.ResolveRepository(image)
 	if err != nil {
 		return err
 	}
 
-	if len(job.Args) > 1 {
-		tag = job.Args[1]
+	if err := validateRepoName(repoInfo.LocalName); err != nil {
+		return err
 	}
-
-	job.GetenvJson("authConfig", authConfig)
-	job.GetenvJson("metaHeaders", &metaHeaders)
 
 	c, err := s.poolAdd("pull", utils.ImageReference(repoInfo.LocalName, tag))
 	if err != nil {
 		if c != nil {
 			// Another pull of the same repository is already taking place; just wait for it to finish
-			job.Stdout.Write(sf.FormatStatus("", "Repository %s already being pulled by another client. Waiting.", repoInfo.LocalName))
+			imagePullConfig.OutStream.Write(sf.FormatStatus("", "Repository %s already being pulled by another client. Waiting.", repoInfo.LocalName))
 			<-c
 			return nil
 		}
@@ -65,7 +62,7 @@ func (s *TagStore) CmdPull(job *engine.Job) error {
 		return err
 	}
 
-	r, err := registry.NewSession(authConfig, registry.HTTPRequestFactory(metaHeaders), endpoint, true)
+	r, err := registry.NewSession(imagePullConfig.AuthConfig, registry.HTTPRequestFactory(imagePullConfig.MetaHeaders), endpoint, true)
 	if err != nil {
 		return err
 	}
@@ -77,14 +74,11 @@ func (s *TagStore) CmdPull(job *engine.Job) error {
 
 	if len(repoInfo.Index.Mirrors) == 0 && (repoInfo.Index.Official || endpoint.Version == registry.APIVersion2) {
 		if repoInfo.Official {
-			j := job.Eng.Job("trust_update_base")
-			if err = j.Run(); err != nil {
-				logrus.Errorf("error updating trust base graph: %s", err)
-			}
+			s.trustService.UpdateBase()
 		}
 
 		logrus.Debugf("pulling v2 repository with local name %q", repoInfo.LocalName)
-		if err := s.pullV2Repository(job.Eng, r, job.Stdout, repoInfo, tag, sf, job.GetenvBool("parallel")); err == nil {
+		if err := s.pullV2Repository(r, imagePullConfig.OutStream, repoInfo, tag, sf, imagePullConfig.Parallel); err == nil {
 			s.eventsService.Log("pull", logName, "")
 			return nil
 		} else if err != registry.ErrDoesNotExist && err != ErrV2RegistryUnavailable {
@@ -95,7 +89,7 @@ func (s *TagStore) CmdPull(job *engine.Job) error {
 	}
 
 	logrus.Debugf("pulling v1 repository with local name %q", repoInfo.LocalName)
-	if err = s.pullRepository(r, job.Stdout, repoInfo, tag, sf, job.GetenvBool("parallel")); err != nil {
+	if err = s.pullRepository(r, imagePullConfig.OutStream, repoInfo, tag, sf, imagePullConfig.Parallel); err != nil {
 		return err
 	}
 
@@ -249,7 +243,7 @@ func (s *TagStore) pullRepository(r *registry.Session, out io.Writer, repoInfo *
 		if askedTag != "" && tag != askedTag {
 			continue
 		}
-		if err := s.Set(repoInfo.LocalName, tag, id, true); err != nil {
+		if err := s.Tag(repoInfo.LocalName, tag, id, true); err != nil {
 			return err
 		}
 	}
@@ -379,7 +373,7 @@ type downloadInfo struct {
 	err        chan error
 }
 
-func (s *TagStore) pullV2Repository(eng *engine.Engine, r *registry.Session, out io.Writer, repoInfo *registry.RepositoryInfo, tag string, sf *streamformatter.StreamFormatter, parallel bool) error {
+func (s *TagStore) pullV2Repository(r *registry.Session, out io.Writer, repoInfo *registry.RepositoryInfo, tag string, sf *streamformatter.StreamFormatter, parallel bool) error {
 	endpoint, err := r.V2RegistryEndpoint(repoInfo.Index)
 	if err != nil {
 		if repoInfo.Index.Official {
@@ -403,14 +397,14 @@ func (s *TagStore) pullV2Repository(eng *engine.Engine, r *registry.Session, out
 			return registry.ErrDoesNotExist
 		}
 		for _, t := range tags {
-			if downloaded, err := s.pullV2Tag(eng, r, out, endpoint, repoInfo, t, sf, parallel, auth); err != nil {
+			if downloaded, err := s.pullV2Tag(r, out, endpoint, repoInfo, t, sf, parallel, auth); err != nil {
 				return err
 			} else if downloaded {
 				layersDownloaded = true
 			}
 		}
 	} else {
-		if downloaded, err := s.pullV2Tag(eng, r, out, endpoint, repoInfo, tag, sf, parallel, auth); err != nil {
+		if downloaded, err := s.pullV2Tag(r, out, endpoint, repoInfo, tag, sf, parallel, auth); err != nil {
 			return err
 		} else if downloaded {
 			layersDownloaded = true
@@ -425,7 +419,7 @@ func (s *TagStore) pullV2Repository(eng *engine.Engine, r *registry.Session, out
 	return nil
 }
 
-func (s *TagStore) pullV2Tag(eng *engine.Engine, r *registry.Session, out io.Writer, endpoint *registry.Endpoint, repoInfo *registry.RepositoryInfo, tag string, sf *streamformatter.StreamFormatter, parallel bool, auth *registry.RequestAuthorization) (bool, error) {
+func (s *TagStore) pullV2Tag(r *registry.Session, out io.Writer, endpoint *registry.Endpoint, repoInfo *registry.RepositoryInfo, tag string, sf *streamformatter.StreamFormatter, parallel bool, auth *registry.RequestAuthorization) (bool, error) {
 	logrus.Debugf("Pulling tag from V2 registry: %q", tag)
 
 	manifestBytes, manifestDigest, err := r.GetV2ImageManifest(endpoint, repoInfo.RemoteName, tag, auth)
@@ -435,7 +429,7 @@ func (s *TagStore) pullV2Tag(eng *engine.Engine, r *registry.Session, out io.Wri
 
 	// loadManifest ensures that the manifest payload has the expected digest
 	// if the tag is a digest reference.
-	manifest, verified, err := s.loadManifest(eng, manifestBytes, manifestDigest, tag)
+	manifest, verified, err := s.loadManifest(manifestBytes, manifestDigest, tag)
 	if err != nil {
 		return false, fmt.Errorf("error verifying manifest: %s", err)
 	}
@@ -495,7 +489,7 @@ func (s *TagStore) pullV2Tag(eng *engine.Engine, r *registry.Session, out io.Wri
 					return err
 				}
 
-				r, l, err := r.GetV2ImageBlobReader(endpoint, repoInfo.RemoteName, di.digest.Algorithm(), di.digest.Hex(), auth)
+				r, l, err := r.GetV2ImageBlobReader(endpoint, repoInfo.RemoteName, di.digest, auth)
 				if err != nil {
 					return err
 				}
@@ -543,8 +537,7 @@ func (s *TagStore) pullV2Tag(eng *engine.Engine, r *registry.Session, out io.Wri
 				di.err <- downloadFunc(di)
 			}(&downloads[i])
 		} else {
-			err := downloadFunc(&downloads[i])
-			if err != nil {
+			if err := downloadFunc(&downloads[i]); err != nil {
 				return false, err
 			}
 		}
@@ -554,8 +547,7 @@ func (s *TagStore) pullV2Tag(eng *engine.Engine, r *registry.Session, out io.Wri
 	for i := len(downloads) - 1; i >= 0; i-- {
 		d := &downloads[i]
 		if d.err != nil {
-			err := <-d.err
-			if err != nil {
+			if err := <-d.err; err != nil {
 				return false, err
 			}
 		}
@@ -617,7 +609,7 @@ func (s *TagStore) pullV2Tag(eng *engine.Engine, r *registry.Session, out io.Wri
 		}
 	} else {
 		// only set the repository/tag -> image ID mapping when pulling by tag (i.e. not by digest)
-		if err = s.Set(repoInfo.LocalName, tag, downloads[0].img.ID, true); err != nil {
+		if err = s.Tag(repoInfo.LocalName, tag, downloads[0].img.ID, true); err != nil {
 			return false, err
 		}
 	}

@@ -46,9 +46,12 @@ target="_blank">docker/docker repository</a>.
     that instead. You'll need to convert what you see in the guide to what is
     appropriate to your tool.
 
-5. Open a terminal window on your local host and change to your home directory. In Windows, you'll work in your Boot2Docker window instead of Powershell or cmd.
+5. Open a terminal window on your local host and change to your home directory. 
 
         $ cd ~
+        
+  In Windows, you'll work in your Boot2Docker window instead of Powershell or
+  a `cmd` window.
 
 6. Create a `repos` directory.
 
@@ -88,7 +91,7 @@ contributions through pseudonyms.
 As you change code in your fork, you'll want to keep it in sync with the changes
 others make in the `docker/docker` repository. To make syncing easier, you'll
 also add a _remote_ called `upstream` that points to `docker/docker`. A remote
-is just another a project version hosted on the internet or network.
+is just another project version hosted on the internet or network.
 
 To configure your username, email, and add a remote:
 
@@ -171,7 +174,7 @@ the branch to your fork on GitHub:
 
     You can use any text editor you are comfortable with.
 
-6. Close and save the file.
+6. Save and close the file.
 
 7. Check the status of your branch. 
 

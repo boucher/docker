@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/docker/docker/cliconfig"
 	"github.com/docker/docker/pkg/requestdecorator"
 )
 
@@ -20,7 +21,7 @@ const (
 )
 
 func spawnTestRegistrySession(t *testing.T) *Session {
-	authConfig := &AuthConfig{}
+	authConfig := &cliconfig.AuthConfig{}
 	endpoint, err := NewEndpoint(makeIndex("/v1/"))
 	if err != nil {
 		t.Fatal(err)
@@ -33,7 +34,7 @@ func spawnTestRegistrySession(t *testing.T) *Session {
 }
 
 func TestPublicSession(t *testing.T) {
-	authConfig := &AuthConfig{}
+	authConfig := &cliconfig.AuthConfig{}
 
 	getSessionDecorators := func(index *IndexInfo) int {
 		endpoint, err := NewEndpoint(index)
@@ -735,7 +736,7 @@ func TestSearchRepositories(t *testing.T) {
 	}
 	assertEqual(t, results.NumResults, 1, "Expected 1 search results")
 	assertEqual(t, results.Query, "fakequery", "Expected 'fakequery' as query")
-	assertEqual(t, results.Results[0].StarCount, 42, "Expected 'fakeimage' a ot hae 42 stars")
+	assertEqual(t, results.Results[0].StarCount, 42, "Expected 'fakeimage' to have 42 stars")
 }
 
 func TestValidRemoteName(t *testing.T) {

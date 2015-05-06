@@ -10,10 +10,11 @@ import (
 
 	flag "github.com/docker/docker/pkg/mflag"
 	"github.com/docker/docker/pkg/parsers"
+	"github.com/docker/docker/pkg/stringutils"
 	"github.com/docker/docker/registry"
-	"github.com/docker/docker/utils"
 )
 
+// ByStars sorts search results in ascending order by number of stars.
 type ByStars []registry.SearchResult
 
 func (r ByStars) Len() int           { return len(r) }
@@ -44,16 +45,13 @@ func (cli *DockerCli) CmdSearch(args ...string) error {
 		return err
 	}
 
-	cli.LoadConfigFile()
-
 	rdr, _, err := cli.clientRequestAttemptLogin("GET", "/images/search?"+v.Encode(), nil, nil, repoInfo.Index, "search")
 	if err != nil {
 		return err
 	}
 
 	results := ByStars{}
-	err = json.NewDecoder(rdr).Decode(&results)
-	if err != nil {
+	if err := json.NewDecoder(rdr).Decode(&results); err != nil {
 		return err
 	}
 
@@ -68,7 +66,7 @@ func (cli *DockerCli) CmdSearch(args ...string) error {
 		desc := strings.Replace(res.Description, "\n", " ", -1)
 		desc = strings.Replace(desc, "\r", " ", -1)
 		if !*noTrunc && len(desc) > 45 {
-			desc = utils.Trunc(desc, 42) + "..."
+			desc = stringutils.Truncate(desc, 42) + "..."
 		}
 		fmt.Fprintf(w, "%s\t%s\t%d\t", res.Name, desc, res.StarCount)
 		if res.IsOfficial {

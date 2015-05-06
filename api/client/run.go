@@ -12,7 +12,6 @@ import (
 	"github.com/docker/docker/pkg/resolvconf"
 	"github.com/docker/docker/pkg/signal"
 	"github.com/docker/docker/runconfig"
-	"github.com/docker/docker/utils"
 )
 
 func (cid *cidFile) Close() error {
@@ -44,10 +43,10 @@ func (cli *DockerCli) CmdRun(args ...string) error {
 
 	// These are flags not stored in Config/HostConfig
 	var (
-		flAutoRemove = cmd.Bool([]string{"#rm", "-rm"}, false, "Automatically remove the container when it exits")
+		flAutoRemove = cmd.Bool([]string{"-rm"}, false, "Automatically remove the container when it exits")
 		flDetach     = cmd.Bool([]string{"d", "-detach"}, false, "Run container in background and print container ID")
-		flSigProxy   = cmd.Bool([]string{"#sig-proxy", "-sig-proxy"}, true, "Proxy received signals to the process")
-		flName       = cmd.String([]string{"#name", "-name"}, "", "Assign a name to the container")
+		flSigProxy   = cmd.Bool([]string{"-sig-proxy"}, true, "Proxy received signals to the process")
+		flName       = cmd.String([]string{"-name"}, "", "Assign a name to the container")
 		flAttach     *opts.ListOpts
 
 		ErrConflictAttachDetach               = fmt.Errorf("Conflicting options: -a and -d")
@@ -242,7 +241,7 @@ func (cli *DockerCli) CmdRun(args ...string) error {
 		}
 	}
 	if status != 0 {
-		return &utils.StatusError{StatusCode: status}
+		return StatusError{StatusCode: status}
 	}
 	return nil
 }

@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 
-	"github.com/docker/docker/engine"
 	"github.com/docker/docker/pkg/listenbuffer"
 )
 
@@ -19,21 +18,21 @@ type tlsConfig struct {
 	Verify      bool
 }
 
-func tlsConfigFromJob(job *engine.Job) *tlsConfig {
-	verify := job.GetenvBool("TlsVerify")
-	if !job.GetenvBool("Tls") && !verify {
+func tlsConfigFromServerConfig(conf *ServerConfig) *tlsConfig {
+	verify := conf.TlsVerify
+	if !conf.Tls && !conf.TlsVerify {
 		return nil
 	}
 	return &tlsConfig{
 		Verify:      verify,
-		Certificate: job.Getenv("TlsCert"),
-		Key:         job.Getenv("TlsKey"),
-		CA:          job.Getenv("TlsCa"),
+		Certificate: conf.TlsCert,
+		Key:         conf.TlsKey,
+		CA:          conf.TlsCa,
 	}
 }
 
-func NewTcpSocket(addr string, config *tlsConfig) (net.Listener, error) {
-	l, err := listenbuffer.NewListenBuffer("tcp", addr, activationLock)
+func NewTcpSocket(addr string, config *tlsConfig, activate <-chan struct{}) (net.Listener, error) {
+	l, err := listenbuffer.NewListenBuffer("tcp", addr, activate)
 	if err != nil {
 		return nil, err
 	}

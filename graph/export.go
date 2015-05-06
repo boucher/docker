@@ -2,14 +2,12 @@ package graph
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"path"
 
 	"github.com/Sirupsen/logrus"
-	"github.com/docker/docker/engine"
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/parsers"
 	"github.com/docker/docker/registry"
@@ -20,10 +18,13 @@ import (
 // uncompressed tar ball.
 // name is the set of tags to export.
 // out is the writer where the images are written to.
-func (s *TagStore) CmdImageExport(job *engine.Job) error {
-	if len(job.Args) < 1 {
-		return fmt.Errorf("Usage: %s IMAGE [IMAGE...]\n", job.Name)
-	}
+type ImageExportConfig struct {
+	Names     []string
+	Outstream io.Writer
+}
+
+func (s *TagStore) ImageExport(imageExportConfig *ImageExportConfig) error {
+
 	// get image json
 	tempdir, err := ioutil.TempDir("", "docker-export-")
 	if err != nil {
@@ -40,7 +41,7 @@ func (s *TagStore) CmdImageExport(job *engine.Job) error {
 			repo[tag] = id
 		}
 	}
-	for _, name := range job.Args {
+	for _, name := range imageExportConfig.Names {
 		name = registry.NormalizeLocalName(name)
 		logrus.Debugf("Serializing %s", name)
 		rootRepo := s.Repositories[name]
@@ -48,7 +49,7 @@ func (s *TagStore) CmdImageExport(job *engine.Job) error {
 			// this is a base repo name, like 'busybox'
 			for tag, id := range rootRepo {
 				addKey(name, tag, id)
-				if err := s.exportImage(job.Eng, id, tempdir); err != nil {
+				if err := s.exportImage(id, tempdir); err != nil {
 					return err
 				}
 			}
@@ -67,13 +68,13 @@ func (s *TagStore) CmdImageExport(job *engine.Job) error {
 				if len(repoTag) > 0 {
 					addKey(repoName, repoTag, img.ID)
 				}
-				if err := s.exportImage(job.Eng, img.ID, tempdir); err != nil {
+				if err := s.exportImage(img.ID, tempdir); err != nil {
 					return err
 				}
 
 			} else {
 				// this must be an ID that didn't get looked up just right?
-				if err := s.exportImage(job.Eng, name, tempdir); err != nil {
+				if err := s.exportImage(name, tempdir); err != nil {
 					return err
 				}
 			}
@@ -82,8 +83,15 @@ func (s *TagStore) CmdImageExport(job *engine.Job) error {
 	}
 	// write repositories, if there is something to write
 	if len(rootRepoMap) > 0 {
-		rootRepoJson, _ := json.Marshal(rootRepoMap)
-		if err := ioutil.WriteFile(path.Join(tempdir, "repositories"), rootRepoJson, os.FileMode(0644)); err != nil {
+		f, err := os.OpenFile(path.Join(tempdir, "repositories"), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+		if err != nil {
+			f.Close()
+			return err
+		}
+		if err := json.NewEncoder(f).Encode(rootRepoMap); err != nil {
+			return err
+		}
+		if err := f.Close(); err != nil {
 			return err
 		}
 	} else {
@@ -96,15 +104,15 @@ func (s *TagStore) CmdImageExport(job *engine.Job) error {
 	}
 	defer fs.Close()
 
-	if _, err := io.Copy(job.Stdout, fs); err != nil {
+	if _, err := io.Copy(imageExportConfig.Outstream, fs); err != nil {
 		return err
 	}
-	logrus.Debugf("End export job: %s", job.Name)
+	logrus.Debugf("End export image")
 	return nil
 }
 
 // FIXME: this should be a top-level function, not a class method
-func (s *TagStore) exportImage(eng *engine.Engine, name, tempdir string) error {
+func (s *TagStore) exportImage(name, tempdir string) error {
 	for n := name; n != ""; {
 		// temporary directory
 		tmpImageDir := path.Join(tempdir, n)
@@ -127,11 +135,16 @@ func (s *TagStore) exportImage(eng *engine.Engine, name, tempdir string) error {
 		if err != nil {
 			return err
 		}
-		job := eng.Job("image_inspect", n)
-		job.SetenvBool("raw", true)
-		job.Stdout.Add(json)
-		if err := job.Run(); err != nil {
+		imageInspectRaw, err := s.LookupRaw(n)
+		if err != nil {
 			return err
+		}
+		written, err := json.Write(imageInspectRaw)
+		if err != nil {
+			return err
+		}
+		if written != len(imageInspectRaw) {
+			logrus.Warnf("%d byes should have been written instead %d have been written", written, len(imageInspectRaw))
 		}
 
 		// serialize filesystem
@@ -139,19 +152,16 @@ func (s *TagStore) exportImage(eng *engine.Engine, name, tempdir string) error {
 		if err != nil {
 			return err
 		}
-		job = eng.Job("image_tarlayer", n)
-		job.Stdout.Add(fsTar)
-		if err := job.Run(); err != nil {
+		if err := s.ImageTarLayer(n, fsTar); err != nil {
 			return err
 		}
 
 		// find parent
-		job = eng.Job("image_get", n)
-		info, _ := job.Stdout.AddEnv()
-		if err := job.Run(); err != nil {
+		img, err := s.LookupImage(n)
+		if err != nil {
 			return err
 		}
-		n = info.Get("Parent")
+		n = img.Parent
 	}
 	return nil
 }
