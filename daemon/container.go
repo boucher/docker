@@ -602,6 +602,19 @@ func validateID(id string) error {
 	return nil
 }
 
+
+func (container *Container) Checkpoint(opts *libcontainer.CriuOpts) error {
+	if err := container.daemon.Checkpoint(container, opts); err != nil {
+		return err
+	}
+
+	if opts.LeaveRunning == false {
+		container.ReleaseNetwork()
+	}
+	return nil
+}
+
+
 func (container *Container) Copy(resource string) (io.ReadCloser, error) {
 	container.Lock()
 	defer container.Unlock()
