@@ -47,6 +47,7 @@ import (
 	"github.com/docker/docker/trust"
 	"github.com/docker/docker/utils"
 	"github.com/docker/docker/volumes"
+	"github.com/docker/libcontainer"
 )
 
 var (
@@ -1046,6 +1047,26 @@ func (daemon *Daemon) Diff(container *Container) (archive.Archive, error) {
 
 func (daemon *Daemon) Run(c *Container, pipes *execdriver.Pipes, startCallback execdriver.StartCallback) (execdriver.ExitStatus, error) {
 	return daemon.execDriver.Run(c.command, pipes, startCallback)
+}
+
+
+func (daemon *Daemon) Checkpoint(c *Container, opts *libcontainer.CriuOpts) error {
+	if err := daemon.execDriver.Checkpoint(c.command, opts); err != nil {
+		return err
+	}
+	c.SetCheckpointed(opts.LeaveRunning)
+	return nil
+}
+
+func (daemon *Daemon) Restore(c *Container, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback, opts *libcontainer.CriuOpts, forceRestore bool) (execdriver.ExitStatus, error) {
+	// Mount the container's filesystem (daemon/graphdriver/aufs/aufs.go).
+	_, err := daemon.driver.Get(c.ID, c.GetMountLabel())
+	if err != nil {
+		return execdriver.ExitStatus{ExitCode: 0}, err
+	}
+
+	exitCode, err := daemon.execDriver.Restore(c.command, pipes, restoreCallback, opts, forceRestore)
+	return exitCode, err
 }
 
 func (daemon *Daemon) Kill(c *Container, sig int) error {

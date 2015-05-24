@@ -41,6 +41,18 @@ type driver struct {
 	sync.Mutex
 }
 
+// FIXME: move this into libcontainer
+// InitFactory returns an options func to configure a LinuxFactory with the
+// provided absolute path to the init binary and arguements and a path to criu
+func InitFactory(criuPath string, path string, args ...string) func(*libcontainer.LinuxFactory) error {
+	return func(l *libcontainer.LinuxFactory) error {
+		l.CriuPath = criuPath
+		l.InitPath = path
+		l.InitArgs = args
+		return nil
+	}
+}
+
 func NewDriver(root, initPath string, options []string) (*driver, error) {
 	meminfo, err := sysinfo.ReadMemInfo()
 	if err != nil {
@@ -96,8 +108,9 @@ func NewDriver(root, initPath string, options []string) (*driver, error) {
 	f, err := libcontainer.New(
 		root,
 		cgm,
-		libcontainer.InitPath(reexec.Self(), DriverName),
+		InitFactory("criu", reexec.Self(), DriverName),
 	)
+
 	if err != nil {
 		return nil, err
 	}
@@ -273,6 +286,145 @@ func (d *driver) Unpause(c *execdriver.Command) error {
 	}
 	return active.Resume()
 }
+
+func (d *driver) Checkpoint(c *execdriver.Command, opts *libcontainer.CriuOpts) error {
+	active := d.activeContainers[c.ID]
+	if active == nil {
+		return fmt.Errorf("active container for %s does not exist", c.ID)
+	}
+
+	d.Lock()
+	defer d.Unlock()
+	err := active.Checkpoint(opts)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (d *driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback, opts *libcontainer.CriuOpts, forceRestore bool) (execdriver.ExitStatus, error) {
+	var (
+		cont libcontainer.Container
+		err error
+	)
+
+	cont, err = d.factory.Load(c.ID)
+	if err != nil {
+		if forceRestore {
+			var config *configs.Config
+			config, err = d.createContainer(c)
+			if err != nil {
+				return execdriver.ExitStatus{ExitCode: -1}, err
+			}
+			cont, err = d.factory.Create(c.ID, config)
+			if err != nil {
+				return execdriver.ExitStatus{ExitCode: -1}, err
+			}
+		} else {
+			return execdriver.ExitStatus{ExitCode: -1}, err
+		}
+	}
+
+	p := &libcontainer.Process{
+		Args: append([]string{c.ProcessConfig.Entrypoint}, c.ProcessConfig.Arguments...),
+		Env:  c.ProcessConfig.Env,
+		Cwd:  c.WorkingDir,
+		User: c.ProcessConfig.User,
+	}
+
+	var term execdriver.Terminal
+	if c.ProcessConfig.Tty {
+		rootuid, err := cont.Config().HostUID()
+		if err != nil {
+			return execdriver.ExitStatus{ExitCode: -1}, err
+		}
+		cons, err := p.NewConsole(rootuid)
+		if err != nil {
+			return execdriver.ExitStatus{ExitCode: -1}, err
+		}
+		term, err = NewTtyConsole(cons, pipes, rootuid)
+	} else {
+		p.Stdout = pipes.Stdout
+		p.Stderr = pipes.Stderr
+
+		r, w, err := os.Pipe()
+		if err != nil {
+			return execdriver.ExitStatus{ExitCode: -1}, err
+		}
+
+		if pipes.Stdin != nil {
+			go func() {
+				io.Copy(w, pipes.Stdin)
+				w.Close()
+			}()
+			p.Stdin = r
+		}
+
+		term = &execdriver.StdConsole{}
+	}
+
+	if err != nil {
+		return execdriver.ExitStatus{ExitCode: -1}, err
+	}
+
+	c.ProcessConfig.Terminal = term
+
+	d.Lock()
+	d.activeContainers[c.ID] = cont
+	d.Unlock()
+	defer func() {
+		cont.Destroy()
+		d.cleanContainer(c.ID)
+	}()
+
+
+	// Since the CRIU binary exits after restoring the container, we
+	// need to reap its child by setting PR_SET_CHILD_SUBREAPER (36)
+	// so that it'll be owned by this process (Docker daemon) after restore.
+	//
+	// XXX This really belongs to where the Docker daemon starts.
+	if _, _, syserr := syscall.RawSyscall(syscall.SYS_PRCTL, 36, 1, 0); syserr != 0 {
+		return execdriver.ExitStatus{ExitCode: -1}, fmt.Errorf("Could not set PR_SET_CHILD_SUBREAPER (syserr %d)", syserr)
+	}
+
+	if err := cont.Restore(p, opts); err != nil {
+		return execdriver.ExitStatus{ExitCode: -1}, err
+	}
+
+	// FIXME: no idea if any of this is needed...
+	if restoreCallback != nil {
+		pid, err := p.Pid()
+		if err != nil {
+			p.Signal(os.Kill)
+			p.Wait()
+			return execdriver.ExitStatus{ExitCode: -1}, err
+		}
+		restoreCallback(&c.ProcessConfig, pid)
+	}
+
+	oom := notifyOnOOM(cont)
+	waitF := p.Wait
+	if nss := cont.Config().Namespaces; !nss.Contains(configs.NEWPID) {
+		// we need such hack for tracking processes with inherited fds,
+		// because cmd.Wait() waiting for all streams to be copied
+		waitF = waitInPIDHost(p, cont)
+	}
+	ps, err := waitF()
+	if err != nil {
+		execErr, ok := err.(*exec.ExitError)
+		if !ok {
+			return execdriver.ExitStatus{ExitCode: -1}, err
+		}
+		ps = execErr.ProcessState
+	}
+
+	cont.Destroy()
+	_, oomKill := <-oom
+	return execdriver.ExitStatus{ExitCode: utils.ExitStatus(ps.Sys().(syscall.WaitStatus)), OOMKilled: oomKill}, nil
+}
+
+
 
 func (d *driver) Terminate(c *execdriver.Command) error {
 	defer d.cleanContainer(c.ID)

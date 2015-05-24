@@ -56,6 +56,7 @@ type NetworkConfiguration struct {
 
 // EndpointConfiguration represents the user specified configuration for the sandbox endpoint
 type EndpointConfiguration struct {
+	IPAddress	 net.IP
 	MacAddress   net.HardwareAddr
 	PortBindings []netutils.PortBinding
 	ExposedPorts []netutils.TransportPort
@@ -509,7 +510,7 @@ func (d *driver) CreateEndpoint(nid, eid types.UUID, epInfo driverapi.EndpointIn
 	}
 
 	// v4 address for the sandbox side pipe interface
-	ip4, err := ipAllocator.RequestIP(n.bridge.bridgeIPv4, nil)
+	ip4, err := ipAllocator.RequestIP(n.bridge.bridgeIPv4, epConfig.IPAddress)
 	if err != nil {
 		return err
 	}
@@ -855,6 +856,14 @@ func parseEndpointOptions(epOptions map[string]interface{}) (*EndpointConfigurat
 	if opt, ok := epOptions[netlabel.MacAddress]; ok {
 		if mac, ok := opt.(net.HardwareAddr); ok {
 			ec.MacAddress = mac
+		} else {
+			return nil, ErrInvalidEndpointConfig
+		}
+	}
+
+	if opt, ok := epOptions[netlabel.IPAddress]; ok {
+		if ip, ok := opt.(net.IP); ok {
+			ec.IPAddress = ip
 		} else {
 			return nil, ErrInvalidEndpointConfig
 		}

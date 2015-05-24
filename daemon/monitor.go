@@ -10,6 +10,7 @@ import (
 	"github.com/docker/docker/daemon/execdriver"
 	"github.com/docker/docker/pkg/stringid"
 	"github.com/docker/docker/runconfig"
+	"github.com/docker/libcontainer"
 )
 
 const defaultTimeIncrement = 100
@@ -44,6 +45,9 @@ type containerMonitor struct {
 	// left waiting for nothing to happen during this time
 	stopChan chan struct{}
 
+	// like startSignal but for restoring a container
+	restoreSignal chan struct{}
+
 	// timeIncrement is the amount of time to wait between restarts
 	// this is in milliseconds
 	timeIncrement int
@@ -61,6 +65,7 @@ func newContainerMonitor(container *Container, policy runconfig.RestartPolicy) *
 		timeIncrement: defaultTimeIncrement,
 		stopChan:      make(chan struct{}),
 		startSignal:   make(chan struct{}),
+		restoreSignal: make(chan struct{}),
 	}
 }
 
@@ -181,6 +186,51 @@ func (m *containerMonitor) Start() error {
 	}
 }
 
+// Like Start() but for restoring a container.
+func (m *containerMonitor) Restore(opts *libcontainer.CriuOpts, forceRestore bool) error {
+	var (
+		err error
+		// XXX The following line should be changed to
+		//     exitStatus execdriver.ExitStatus to match Start()
+		exitCode     execdriver.ExitStatus
+		afterRestore bool
+	)
+	defer func() {
+		if afterRestore {
+			m.container.Lock()
+			m.container.setStopped(&execdriver.ExitStatus{exitCode.ExitCode, false})
+			defer m.container.Unlock()
+		}
+		m.Close()
+	}()
+
+	// FIXME: right now if we startLogging again we get double logs after a restore
+	if m.container.logCopier == nil {
+		if err := m.container.startLogging(); err != nil {
+			m.resetContainer(false)
+			return err
+		}
+	}
+
+	pipes := execdriver.NewPipes(m.container.stdin, m.container.stdout, m.container.stderr, m.container.Config.OpenStdin)
+
+	m.container.LogEvent("restore")
+	m.lastStartTime = time.Now()
+	if exitCode, err = m.container.daemon.Restore(m.container, pipes, m.restoreCallback, opts, forceRestore); err != nil {
+		logrus.Errorf("Error restoring container: %s, exitCode=%d", err, exitCode)
+		m.container.ExitCode = -1
+		m.resetContainer(false)
+		return err
+	}
+	afterRestore = true
+
+	m.container.ExitCode = exitCode.ExitCode
+	m.resetMonitor(err == nil && exitCode.ExitCode == 0)
+	m.container.LogEvent("die")
+	m.resetContainer(true)
+	return err
+}
+
 // resetMonitor resets the stateful fields on the containerMonitor based on the
 // previous runs success or failure.  Regardless of success, if the container had
 // an execution time of more than 10s then reset the timer back to the default
@@ -264,6 +314,29 @@ func (m *containerMonitor) callback(processConfig *execdriver.ProcessConfig, pid
 
 	if err := m.container.ToDisk(); err != nil {
 		logrus.Debugf("%s", err)
+	}
+}
+
+// Like callback() but for restoring a container.
+func (m *containerMonitor) restoreCallback(processConfig *execdriver.ProcessConfig, restorePid int) {
+	// If restorePid is 0, it means that restore failed.
+	if restorePid != 0 {
+		m.container.setRunning(restorePid)
+	}
+
+	// Unblock the goroutine waiting in waitForRestore().
+	select {
+	case <-m.restoreSignal:
+	default:
+		close(m.restoreSignal)
+	}
+
+	if restorePid != 0 {
+		// Write config.json and hostconfig.json files
+		// to /var/lib/docker/containers/<ID>.
+		if err := m.container.ToDisk(); err != nil {
+			logrus.Debugf("%s", err)
+		}
 	}
 }
 
