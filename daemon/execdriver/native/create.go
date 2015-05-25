@@ -4,7 +4,6 @@ package native
 
 import (
 	"errors"
-	"encoding/json"
 	"fmt"
 	"net"
 	"strings"

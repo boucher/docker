@@ -72,9 +72,9 @@ type Driver interface {
 	// Unpause unpauses a container.
 	Unpause(c *Command) error
 
-	Checkpoint(c *Command) error
+	Checkpoint(c *Command, opts *libcontainer.CriuOpts) error
 
-	Restore(c *Command, pipes *Pipes, restoreCallback RestoreCallback) (int, error)
+	Restore(c *Command, pipes *Pipes, restoreCallback RestoreCallback, opts *libcontainer.CriuOpts, forceRestore bool) (ExitStatus, error)
 
 	// Name returns the name of the driver.
 	Name() string
