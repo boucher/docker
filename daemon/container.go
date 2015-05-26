@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/docker/libcontainer"
 	"github.com/docker/libcontainer/label"
 
 	"github.com/Sirupsen/logrus"
@@ -255,7 +256,7 @@ func (container *Container) Start() (err error) {
 	if err := container.Mount(); err != nil {
 		return err
 	}
-	if err := container.initializeNetworking(); err != nil {
+	if err := container.initializeNetworking(false); err != nil {
 		return err
 	}
 	container.verifyDaemonSettings()
@@ -339,12 +340,11 @@ func (container *Container) isNetworkAllocated() bool {
 	return container.NetworkSettings.IPAddress != ""
 }
 
-
 // cleanup releases any network resources allocated to the container along with any rules
 // around how containers are linked together.  It also unmounts the container's root filesystem.
 func (container *Container) cleanup() {
 	if container.IsCheckpointed() {
-		log.CRDbg("not calling ReleaseNetwork() for checkpointed container %s", container.ID)
+		logrus.Debugf("not calling ReleaseNetwork() for checkpointed container %s", container.ID)
 	} else {
 		container.ReleaseNetwork()
 	}
@@ -569,7 +569,6 @@ func validateID(id string) error {
 	return nil
 }
 
-
 func (container *Container) Checkpoint(opts *libcontainer.CriuOpts) error {
 	if err := container.daemon.Checkpoint(container, opts); err != nil {
 		return err
@@ -581,6 +580,43 @@ func (container *Container) Checkpoint(opts *libcontainer.CriuOpts) error {
 	return nil
 }
 
+func (container *Container) Restore(opts *libcontainer.CriuOpts, forceRestore bool) error {
+	var err error
+	container.Lock()
+	defer container.Unlock()
+
+	defer func() {
+		if err != nil {
+			container.cleanup()
+		}
+	}()
+	if err := container.Mount(); err != nil {
+		return err
+	}
+	if err = container.initializeNetworking(true); err != nil {
+		return err
+	}
+	container.verifyDaemonSettings()
+
+	linkedEnv, err := container.setupLinkedContainers()
+	if err != nil {
+		return err
+	}
+	if err = container.setupWorkingDirectory(); err != nil {
+		return err
+	}
+
+	env := container.createDaemonEnvironment(linkedEnv)
+	if err = populateCommand(container, env); err != nil {
+		return err
+	}
+
+	if err = container.setupMounts(); err != nil {
+		return err
+	}
+
+	return container.waitForRestore(opts, forceRestore)
+}
 
 func (container *Container) Copy(resource string) (io.ReadCloser, error) {
 	container.Lock()
@@ -639,41 +675,6 @@ func (container *Container) Copy(resource string) (io.ReadCloser, error) {
 			return err
 		}),
 		nil
-}
-
-func (container *Container) Checkpoint() error {
-	return container.daemon.Checkpoint(container)
-}
-
-func (container *Container) Restore() error {
-	var err error
-
-	container.Lock()
-	defer container.Unlock()
-
-	defer func() {
-		if err != nil {
-			container.cleanup()
-		}
-	}()
-
-	if err = container.initializeNetworking(); err != nil {
-		return err
-	}
-
-	linkedEnv, err := container.setupLinkedContainers()
-	if err != nil {
-		return err
-	}
-	if err = container.setupWorkingDirectory(); err != nil {
-		return err
-	}
-	env := container.createDaemonEnvironment(linkedEnv)
-	if err = populateCommandRestore(container, env); err != nil {
-		return err
-	}
-
-	return container.waitForRestore()
 }
 
 // Returns true if the container exposes a certain port
@@ -762,10 +763,7 @@ func (container *Container) waitForStart() error {
 	return nil
 }
 
-// Like waitForStart() but for restoring a container.
-//
-// XXX Does RestartPolicy apply here?
-func (container *Container) waitForRestore() error {
+func (container *Container) waitForRestore(opts *libcontainer.CriuOpts, forceRestore bool) error {
 	container.monitor = newContainerMonitor(container, container.hostConfig.RestartPolicy)
 
 	// After calling promise.Go() we'll have two goroutines:
@@ -778,7 +776,7 @@ func (container *Container) waitForRestore() error {
 		if container.ExitCode != 0 {
 			return fmt.Errorf("restore process failed")
 		}
-	case err := <-promise.Go(container.monitor.Restore):
+	case err := <-promise.Go(func() error { return container.monitor.Restore(opts, forceRestore) }):
 		return err
 	}
 
@@ -989,6 +987,7 @@ func attach(streamConfig *StreamConfig, openStdin, stdinOnce, tty bool, stdin io
 			_, err = copyEscapable(cStdin, stdin)
 		} else {
 			_, err = io.Copy(cStdin, stdin)
+
 		}
 		if err == io.ErrClosedPipe {
 			err = nil

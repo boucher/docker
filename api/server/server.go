@@ -36,6 +36,7 @@ import (
 	"github.com/docker/docker/pkg/version"
 	"github.com/docker/docker/runconfig"
 	"github.com/docker/docker/utils"
+	"github.com/docker/libcontainer"
 	"github.com/docker/libnetwork/portallocator"
 )
 
@@ -1286,32 +1287,44 @@ func (s *Server) postContainersCopy(version version.Version, w http.ResponseWrit
 	return nil
 }
 
-func postContainersCheckpoint(eng *engine.Engine, version version.Version, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+func (s *Server) postContainersCheckpoint(version version.Version, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
 	if vars == nil {
 		return fmt.Errorf("Missing parameter")
 	}
 	if err := parseForm(r); err != nil {
 		return err
 	}
-	job := eng.Job("checkpoint", vars["name"])
-	if err := job.Run(); err != nil {
+
+	criuOpts := &libcontainer.CriuOpts{}
+	if err := json.NewDecoder(r.Body).Decode(criuOpts); err != nil {
 		return err
 	}
+
+	if err := s.daemon.ContainerCheckpoint(vars["name"], criuOpts); err != nil {
+		return err
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 
-func postContainersRestore(eng *engine.Engine, version version.Version, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+func (s *Server) postContainersRestore(version version.Version, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
 	if vars == nil {
 		return fmt.Errorf("Missing parameter")
 	}
 	if err := parseForm(r); err != nil {
 		return err
 	}
-	job := eng.Job("restore", vars["name"])
-	if err := job.Run(); err != nil {
+
+	restoreOpts := runconfig.RestoreConfig{}
+	if err := json.NewDecoder(r.Body).Decode(&restoreOpts); err != nil {
 		return err
 	}
+
+	if err := s.daemon.ContainerRestore(vars["name"], &restoreOpts.CriuOpts, restoreOpts.ForceRestore); err != nil {
+		return err
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }

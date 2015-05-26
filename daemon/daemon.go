@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/docker/libcontainer"
 	"github.com/docker/libcontainer/label"
 	"github.com/docker/libnetwork"
 	"github.com/docker/libnetwork/netlabel"
@@ -1060,22 +1061,22 @@ func (daemon *Daemon) Run(c *Container, pipes *execdriver.Pipes, startCallback e
 	return daemon.execDriver.Run(c.command, pipes, startCallback)
 }
 
-func (daemon *Daemon) Checkpoint(c *Container) error {
-	if err := daemon.execDriver.Checkpoint(c.command); err != nil {
+func (daemon *Daemon) Checkpoint(c *Container, opts *libcontainer.CriuOpts) error {
+	if err := daemon.execDriver.Checkpoint(c.command, opts); err != nil {
 		return err
 	}
-	c.SetCheckpointed()
+	c.SetCheckpointed(opts.LeaveRunning)
 	return nil
 }
 
-func (daemon *Daemon) Restore(c *Container, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback) (int, error) {
+func (daemon *Daemon) Restore(c *Container, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback, opts *libcontainer.CriuOpts, forceRestore bool) (execdriver.ExitStatus, error) {
 	// Mount the container's filesystem (daemon/graphdriver/aufs/aufs.go).
 	_, err := daemon.driver.Get(c.ID, c.GetMountLabel())
 	if err != nil {
-		return 0, err
+		return execdriver.ExitStatus{ExitCode: 0}, err
 	}
 
-	exitCode, err := daemon.execDriver.Restore(c.command, pipes, restoreCallback)
+	exitCode, err := daemon.execDriver.Restore(c.command, pipes, restoreCallback, opts, forceRestore)
 	return exitCode, err
 }
 
