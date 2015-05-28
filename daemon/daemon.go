@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/docker/libcontainer"
 	"github.com/docker/libcontainer/label"
 	"github.com/docker/libnetwork"
 	"github.com/docker/libnetwork/netlabel"
@@ -279,6 +280,18 @@ func (daemon *Daemon) restore() error {
 			logrus.Debugf("Loaded container %v", container.ID)
 
 			containers[container.ID] = container
+
+			// If the container was checkpointed, we need to reserve
+			// the IP address that it was using.
+			//
+			// XXX We should also reserve host ports (if any).
+			if container.IsCheckpointed() {
+				/*err = bridge.ReserveIP(container.ID, container.NetworkSettings.IPAddress)
+				if err != nil {
+					log.Errorf("Failed to reserve IP %s for container %s",
+						container.ID, container.NetworkSettings.IPAddress)
+				}*/
+			}
 		} else {
 			logrus.Debugf("Cannot load container %s because it was created with another graph driver.", container.ID)
 		}
@@ -1046,6 +1059,25 @@ func (daemon *Daemon) Diff(container *Container) (archive.Archive, error) {
 
 func (daemon *Daemon) Run(c *Container, pipes *execdriver.Pipes, startCallback execdriver.StartCallback) (execdriver.ExitStatus, error) {
 	return daemon.execDriver.Run(c.command, pipes, startCallback)
+}
+
+func (daemon *Daemon) Checkpoint(c *Container, opts *libcontainer.CriuOpts) error {
+	if err := daemon.execDriver.Checkpoint(c.command, opts); err != nil {
+		return err
+	}
+	c.SetCheckpointed(opts.LeaveRunning)
+	return nil
+}
+
+func (daemon *Daemon) Restore(c *Container, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback, opts *libcontainer.CriuOpts, forceRestore bool) (execdriver.ExitStatus, error) {
+	// Mount the container's filesystem (daemon/graphdriver/aufs/aufs.go).
+	_, err := daemon.driver.Get(c.ID, c.GetMountLabel())
+	if err != nil {
+		return execdriver.ExitStatus{ExitCode: 0}, err
+	}
+
+	exitCode, err := daemon.execDriver.Restore(c.command, pipes, restoreCallback, opts, forceRestore)
+	return exitCode, err
 }
 
 func (daemon *Daemon) Kill(c *Container, sig int) error {

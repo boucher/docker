@@ -637,7 +637,7 @@ func (container *Container) UpdateNetwork() error {
 	return nil
 }
 
-func (container *Container) buildCreateEndpointOptions() ([]libnetwork.EndpointOption, error) {
+func (container *Container) buildCreateEndpointOptions(restoring bool) ([]libnetwork.EndpointOption, error) {
 	var (
 		portSpecs     = make(nat.PortSet)
 		bindings      = make(nat.PortMap)
@@ -718,10 +718,18 @@ func (container *Container) buildCreateEndpointOptions() ([]libnetwork.EndpointO
 		createOptions = append(createOptions, libnetwork.EndpointOptionGeneric(genericOption))
 	}
 
+	/*if restoring && container.NetworkSettings.IPAddress != "" {
+		genericOption := options.Generic{
+			netlabel.IPAddress: net.ParseIP(container.NetworkSettings.IPAddress),
+		}
+
+		createOptions = append(createOptions, libnetwork.EndpointOptionGeneric(genericOption))
+	}*/
+
 	return createOptions, nil
 }
 
-func (container *Container) AllocateNetwork() error {
+func (container *Container) AllocateNetwork(restoring bool) error {
 	mode := container.hostConfig.NetworkMode
 	if container.Config.NetworkDisabled || mode.IsContainer() {
 		return nil
@@ -734,7 +742,7 @@ func (container *Container) AllocateNetwork() error {
 		return fmt.Errorf("error locating network with name %s: %v", string(mode), err)
 	}
 
-	createOptions, err := container.buildCreateEndpointOptions()
+	createOptions, err := container.buildCreateEndpointOptions(restoring)
 	if err != nil {
 		return err
 	}
@@ -768,7 +776,7 @@ func (container *Container) AllocateNetwork() error {
 	return nil
 }
 
-func (container *Container) initializeNetworking() error {
+func (container *Container) initializeNetworking(restoring bool) error {
 	var err error
 
 	// Make sure NetworkMode has an acceptable value before
@@ -809,7 +817,7 @@ func (container *Container) initializeNetworking() error {
 
 	}
 
-	if err := container.AllocateNetwork(); err != nil {
+	if err := container.AllocateNetwork(restoring); err != nil {
 		return err
 	}
 

@@ -30,6 +30,7 @@ var (
 	dockerCommands = []command{
 		{"attach", "Attach to a running container"},
 		{"build", "Build an image from a Dockerfile"},
+		{"checkpoint", "Checkpoint one or more running containers"},
 		{"commit", "Create a new image from a container's changes"},
 		{"cp", "Copy files/folders from a container's filesystem to the host path"},
 		{"create", "Create a new container"},
@@ -54,6 +55,7 @@ var (
 		{"push", "Push an image or a repository to a Docker registry server"},
 		{"rename", "Rename an existing container"},
 		{"restart", "Restart a running container"},
+		{"restore", "Restore one or more checkpointed containers"},
 		{"rm", "Remove one or more containers"},
 		{"rmi", "Remove one or more images"},
 		{"run", "Run a command in a new container"},

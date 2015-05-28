@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/docker/libcontainer"
 	"github.com/docker/libcontainer/label"
 
 	"github.com/Sirupsen/logrus"
@@ -255,7 +256,7 @@ func (container *Container) Start() (err error) {
 	if err := container.Mount(); err != nil {
 		return err
 	}
-	if err := container.initializeNetworking(); err != nil {
+	if err := container.initializeNetworking(false); err != nil {
 		return err
 	}
 	container.verifyDaemonSettings()
@@ -342,7 +343,11 @@ func (container *Container) isNetworkAllocated() bool {
 // cleanup releases any network resources allocated to the container along with any rules
 // around how containers are linked together.  It also unmounts the container's root filesystem.
 func (container *Container) cleanup() {
-	container.ReleaseNetwork()
+	if container.IsCheckpointed() {
+		logrus.Debugf("not calling ReleaseNetwork() for checkpointed container %s", container.ID)
+	} else {
+		container.ReleaseNetwork()
+	}
 
 	disableAllActiveLinks(container)
 
@@ -564,6 +569,55 @@ func validateID(id string) error {
 	return nil
 }
 
+func (container *Container) Checkpoint(opts *libcontainer.CriuOpts) error {
+	if err := container.daemon.Checkpoint(container, opts); err != nil {
+		return err
+	}
+
+	if opts.LeaveRunning == false {
+		container.ReleaseNetwork()
+	}
+	return nil
+}
+
+func (container *Container) Restore(opts *libcontainer.CriuOpts, forceRestore bool) error {
+	var err error
+	container.Lock()
+	defer container.Unlock()
+
+	defer func() {
+		if err != nil {
+			container.cleanup()
+		}
+	}()
+	if err := container.Mount(); err != nil {
+		return err
+	}
+	if err = container.initializeNetworking(true); err != nil {
+		return err
+	}
+	container.verifyDaemonSettings()
+
+	linkedEnv, err := container.setupLinkedContainers()
+	if err != nil {
+		return err
+	}
+	if err = container.setupWorkingDirectory(); err != nil {
+		return err
+	}
+
+	env := container.createDaemonEnvironment(linkedEnv)
+	if err = populateCommand(container, env); err != nil {
+		return err
+	}
+
+	if err = container.setupMounts(); err != nil {
+		return err
+	}
+
+	return container.waitForRestore(opts, forceRestore)
+}
+
 func (container *Container) Copy(resource string) (io.ReadCloser, error) {
 	container.Lock()
 	defer container.Unlock()
@@ -703,6 +757,26 @@ func (container *Container) waitForStart() error {
 	select {
 	case <-container.monitor.startSignal:
 	case err := <-promise.Go(container.monitor.Start):
+		return err
+	}
+
+	return nil
+}
+
+func (container *Container) waitForRestore(opts *libcontainer.CriuOpts, forceRestore bool) error {
+	container.monitor = newContainerMonitor(container, container.hostConfig.RestartPolicy)
+
+	// After calling promise.Go() we'll have two goroutines:
+	// - The current goroutine that will block in the select
+	//   below until restore is done.
+	// - A new goroutine that will restore the container and
+	//   wait for it to exit.
+	select {
+	case <-container.monitor.restoreSignal:
+		if container.ExitCode != 0 {
+			return fmt.Errorf("restore process failed")
+		}
+	case err := <-promise.Go(func() error { return container.monitor.Restore(opts, forceRestore) }):
 		return err
 	}
 

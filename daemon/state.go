@@ -14,6 +14,7 @@ type State struct {
 	Running           bool
 	Paused            bool
 	Restarting        bool
+	Checkpointed      bool
 	OOMKilled         bool
 	removalInProgress bool // Not need for this to be persistent on disk.
 	Dead              bool
@@ -22,6 +23,7 @@ type State struct {
 	Error             string // contains last known error when starting the container
 	StartedAt         time.Time
 	FinishedAt        time.Time
+	CheckpointedAt    time.Time
 	waitChan          chan struct{}
 }
 
@@ -48,6 +50,10 @@ func (s *State) String() string {
 		return "Removal In Progress"
 	}
 
+	if s.Checkpointed {
+		return fmt.Sprintf("Checkpointed %s ago", units.HumanDuration(time.Now().UTC().Sub(s.CheckpointedAt)))
+	}
+
 	if s.Dead {
 		return "Dead"
 	}
@@ -69,6 +75,10 @@ func (s *State) StateString() string {
 			return "restarting"
 		}
 		return "running"
+	}
+
+	if s.Checkpointed {
+		return "checkpointed'"
 	}
 
 	if s.Dead {
@@ -158,6 +168,7 @@ func (s *State) setRunning(pid int) {
 	s.Error = ""
 	s.Running = true
 	s.Paused = false
+	s.Checkpointed = false
 	s.Restarting = false
 	s.ExitCode = 0
 	s.Pid = pid
@@ -253,4 +264,25 @@ func (s *State) SetDead() {
 	s.Lock()
 	s.Dead = true
 	s.Unlock()
+}
+
+func (s *State) SetCheckpointed(leaveRunning bool) {
+	s.Lock()
+	s.CheckpointedAt = time.Now().UTC()
+	s.Checkpointed = !leaveRunning
+	s.Running = leaveRunning
+	s.Paused = false
+	s.Restarting = false
+	// XXX Not sure if we need to close and recreate waitChan.
+	// close(s.waitChan)
+	// s.waitChan = make(chan struct{})
+	s.Unlock()
+}
+
+func (s *State) HasBeenCheckpointed() bool {
+	return s.CheckpointedAt != time.Time{}
+}
+
+func (s *State) IsCheckpointed() bool {
+	return s.Checkpointed
 }
