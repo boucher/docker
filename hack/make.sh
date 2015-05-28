@@ -52,9 +52,9 @@ DEFAULT_BUNDLES=(
 
 	binary
 
-	test-unit
-	test-integration-cli
-	test-docker-py
+#	test-unit
+#	test-integration-cli
+#	test-docker-py
 
 	dynbinary
 
