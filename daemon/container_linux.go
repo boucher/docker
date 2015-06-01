@@ -329,53 +329,6 @@ func mergeDevices(defaultDevices, userDevices []*configs.Device) []*configs.Devi
 	return append(devs, userDevices...)
 }
 
-// Like populateCommand() but for restoring a container.
-//
-// XXX populateCommand() does a lot more.  Not sure if we have
-//     to do everything it does.
-func populateCommandRestore(c *Container, env []string) error {
-	resources := &execdriver.Resources{
-		Memory:     c.Config.Memory,
-		MemorySwap: c.Config.MemorySwap,
-		CpuShares:  c.Config.CpuShares,
-		Cpuset:     c.Config.Cpuset,
-	}
-
-	processConfig := execdriver.ProcessConfig{
-		Privileged: c.hostConfig.Privileged,
-		Entrypoint: c.Path,
-		Arguments:  c.Args,
-		Tty:        c.Config.Tty,
-		User:       c.Config.User,
-	}
-
-	processConfig.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	processConfig.Env = env
-
-	c.command = &execdriver.Command{
-		ID:             c.ID,
-		Rootfs:         c.RootfsPath(),
-		ReadonlyRootfs: c.hostConfig.ReadonlyRootfs,
-		InitPath:       "/.dockerinit",
-		WorkingDir:     c.Config.WorkingDir,
-		// Network:     en,
-		// Ipc:         ipc,
-		// Pid:         pid,
-		Resources: resources,
-		// AllowedDevices: allowedDevices,
-		// AutoCreatedDevices: autoCreatedDevices,
-		CapAdd:        c.hostConfig.CapAdd,
-		CapDrop:       c.hostConfig.CapDrop,
-		ProcessConfig: processConfig,
-		ProcessLabel:  c.GetProcessLabel(),
-		MountLabel:    c.GetMountLabel(),
-		// LxcConfig:  lxcConfig,
-		AppArmorProfile: c.AppArmorProfile,
-	}
-
-	return nil
-}
-
 // GetSize, return real size, virtual size
 func (container *Container) GetSize() (int64, int64) {
 	var (
@@ -710,7 +663,7 @@ func (container *Container) UpdateNetwork() error {
 	return nil
 }
 
-func (container *Container) buildCreateEndpointOptions() ([]libnetwork.EndpointOption, error) {
+func (container *Container) buildCreateEndpointOptions(restoring bool) ([]libnetwork.EndpointOption, error) {
 	var (
 		portSpecs     = make(nat.PortSet)
 		bindings      = make(nat.PortMap)
@@ -781,10 +734,18 @@ func (container *Container) buildCreateEndpointOptions() ([]libnetwork.EndpointO
 		createOptions = append(createOptions, libnetwork.EndpointOptionGeneric(genericOption))
 	}
 
+	/*if restoring && container.NetworkSettings.IPAddress != "" {
+		genericOption := options.Generic{
+			netlabel.IPAddress: net.ParseIP(container.NetworkSettings.IPAddress),
+		}
+
+		createOptions = append(createOptions, libnetwork.EndpointOptionGeneric(genericOption))
+	}*/
+
 	return createOptions, nil
 }
 
-func (container *Container) AllocateNetwork() error {
+func (container *Container) AllocateNetwork(restoring bool) error {
 	mode := container.hostConfig.NetworkMode
 	if container.Config.NetworkDisabled || mode.IsContainer() {
 		return nil
@@ -797,7 +758,7 @@ func (container *Container) AllocateNetwork() error {
 		return fmt.Errorf("error locating network with name %s: %v", string(mode), err)
 	}
 
-	createOptions, err := container.buildCreateEndpointOptions()
+	createOptions, err := container.buildCreateEndpointOptions(restoring)
 	if err != nil {
 		return err
 	}
@@ -831,7 +792,7 @@ func (container *Container) AllocateNetwork() error {
 	return nil
 }
 
-func (container *Container) initializeNetworking() error {
+func (container *Container) initializeNetworking(restoring bool) error {
 	var err error
 
 	// Make sure NetworkMode has an acceptable value before
@@ -872,7 +833,7 @@ func (container *Container) initializeNetworking() error {
 
 	}
 
-	if err := container.AllocateNetwork(); err != nil {
+	if err := container.AllocateNetwork(restoring); err != nil {
 		return err
 	}
 
