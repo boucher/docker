@@ -20,6 +20,7 @@ import (
 	"github.com/docker/docker/pkg/reexec"
 	sysinfo "github.com/docker/docker/pkg/system"
 	"github.com/docker/docker/pkg/term"
+	"github.com/docker/docker/runconfig"
 	"github.com/docker/libcontainer"
 	"github.com/docker/libcontainer/apparmor"
 	"github.com/docker/libcontainer/cgroups/systemd"
@@ -277,7 +278,18 @@ func (d *driver) Unpause(c *execdriver.Command) error {
 	return active.Resume()
 }
 
-func (d *driver) Checkpoint(c *execdriver.Command, opts *libcontainer.CriuOpts) error {
+func libcontainerCriuOpts(runconfigOpts *runconfig.CriuConfig) *libcontainer.CriuOpts {
+	return &libcontainer.CriuOpts{
+		ImagesDirectory:         runconfigOpts.ImagesDirectory,
+		WorkDirectory:           runconfigOpts.WorkDirectory,
+		LeaveRunning:            runconfigOpts.LeaveRunning,
+		TcpEstablished:          runconfigOpts.TcpEstablished,
+		ExternalUnixConnections: runconfigOpts.ExternalUnixConnections,
+		ShellJob:                runconfigOpts.ShellJob,
+	}
+}
+
+func (d *driver) Checkpoint(c *execdriver.Command, opts *runconfig.CriuConfig) error {
 	active := d.activeContainers[c.ID]
 	if active == nil {
 		return fmt.Errorf("active container for %s does not exist", c.ID)
@@ -285,7 +297,7 @@ func (d *driver) Checkpoint(c *execdriver.Command, opts *libcontainer.CriuOpts) 
 
 	d.Lock()
 	defer d.Unlock()
-	err := active.Checkpoint(opts)
+	err := active.Checkpoint(libcontainerCriuOpts(opts))
 	if err != nil {
 		return err
 	}
@@ -293,7 +305,7 @@ func (d *driver) Checkpoint(c *execdriver.Command, opts *libcontainer.CriuOpts) 
 	return nil
 }
 
-func (d *driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback, opts *libcontainer.CriuOpts, forceRestore bool) (execdriver.ExitStatus, error) {
+func (d *driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback, opts *runconfig.CriuConfig, forceRestore bool) (execdriver.ExitStatus, error) {
 	var (
 		cont libcontainer.Container
 		err  error
@@ -336,7 +348,7 @@ func (d *driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, restore
 		d.cleanContainer(c.ID)
 	}()
 
-	if err := cont.Restore(p, opts); err != nil {
+	if err := cont.Restore(p, libcontainerCriuOpts(opts)); err != nil {
 		return execdriver.ExitStatus{ExitCode: -1}, err
 	}
 

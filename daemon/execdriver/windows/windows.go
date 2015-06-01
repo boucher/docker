@@ -13,6 +13,7 @@ import (
 	"fmt"
 
 	"github.com/docker/docker/daemon/execdriver"
+	"github.com/docker/docker/runconfig"
 )
 
 const (
@@ -94,4 +95,12 @@ func (d *driver) Stats(id string) (*execdriver.ResourceStats, error) {
 
 func (d *driver) Exec(c *execdriver.Command, processConfig *execdriver.ProcessConfig, pipes *execdriver.Pipes, startCallback execdriver.StartCallback) (int, error) {
 	return 0, nil
+}
+
+func (d *driver) Checkpoint(c *execdriver.Command, opts *runconfig.CriuConfig) error {
+	return fmt.Errorf("Windows: Containers cannot be checkpointed")
+}
+
+func (d *driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback, opts *runconfig.CriuConfig, forceRestore bool) (execdriver.ExitStatus, error) {
+	return execdriver.ExitStatus{ExitCode: 0}, fmt.Errorf("Windows: Containers cannot be restored")
 }
