@@ -25,7 +25,6 @@ type State struct {
 	FinishedAt        time.Time
 	CheckpointedAt    time.Time
 	waitChan          chan struct{}
-
 }
 
 func NewState() *State {
@@ -45,12 +44,14 @@ func (s *State) String() string {
 		}
 
 		return fmt.Sprintf("Up %s", units.HumanDuration(time.Now().UTC().Sub(s.StartedAt)))
-	} else if s.Checkpointed {
-		return fmt.Sprintf("Checkpointed %s ago", units.HumanDuration(time.Now().UTC().Sub(s.CheckpointedAt)))
 	}
 
 	if s.removalInProgress {
 		return "Removal In Progress"
+	}
+
+	if s.Checkpointed {
+		return fmt.Sprintf("Checkpointed %s ago", units.HumanDuration(time.Now().UTC().Sub(s.CheckpointedAt)))
 	}
 
 	if s.Dead {
@@ -78,6 +79,10 @@ func (s *State) StateString() string {
 			return "restarting"
 		}
 		return "running"
+	}
+
+	if s.Checkpointed {
+		return "checkpointed'"
 	}
 
 	if s.Dead {
@@ -281,17 +286,21 @@ func (s *State) SetDead() {
 	s.Unlock()
 }
 
-func (s *State) SetCheckpointed() {
+func (s *State) SetCheckpointed(leaveRunning bool) {
 	s.Lock()
 	s.CheckpointedAt = time.Now().UTC()
-	s.Checkpointed = true
-	s.Running = false
+	s.Checkpointed = !leaveRunning
+	s.Running = leaveRunning
 	s.Paused = false
 	s.Restarting = false
 	// XXX Not sure if we need to close and recreate waitChan.
 	// close(s.waitChan)
 	// s.waitChan = make(chan struct{})
 	s.Unlock()
+}
+
+func (s *State) HasBeenCheckpointed() bool {
+	return s.CheckpointedAt != time.Time{}
 }
 
 func (s *State) IsCheckpointed() bool {
