@@ -189,43 +189,45 @@ func (m *containerMonitor) Start() error {
 }
 
 // Like Start() but for restoring a container.
-func (m *containerMonitor) Restore() error {
+func (m *containerMonitor) Restore(opts *runconfig.CriuConfig, forceRestore bool) error {
 	var (
 		err error
 		// XXX The following line should be changed to
 		//     exitStatus execdriver.ExitStatus to match Start()
-		exitCode     int
+		exitCode     execdriver.ExitStatus
 		afterRestore bool
 	)
-
 	defer func() {
 		if afterRestore {
 			m.container.Lock()
-			m.container.setStopped(&execdriver.ExitStatus{exitCode, false})
+			m.container.setStopped(&execdriver.ExitStatus{exitCode.ExitCode, false})
 			defer m.container.Unlock()
 		}
 		m.Close()
 	}()
 
-	if err := m.container.startLoggingToDisk(); err != nil {
-		m.resetContainer(false)
-		return err
+	// FIXME: right now if we startLogging again we get double logs after a restore
+	if m.container.logCopier == nil {
+		if err := m.container.startLogging(); err != nil {
+			m.resetContainer(false)
+			return err
+		}
 	}
 
 	pipes := execdriver.NewPipes(m.container.stdin, m.container.stdout, m.container.stderr, m.container.Config.OpenStdin)
 
 	m.container.LogEvent("restore")
 	m.lastStartTime = time.Now()
-	if exitCode, err = m.container.daemon.Restore(m.container, pipes, m.restoreCallback); err != nil {
-		log.Errorf("Error restoring container: %s, exitCode=%d", err, exitCode)
+	if exitCode, err = m.container.daemon.Restore(m.container, pipes, m.restoreCallback, opts, forceRestore); err != nil {
+		logrus.Errorf("Error restoring container: %s, exitCode=%d", err, exitCode)
 		m.container.ExitCode = -1
 		m.resetContainer(false)
 		return err
 	}
 	afterRestore = true
 
-	m.container.ExitCode = exitCode
-	m.resetMonitor(err == nil && exitCode == 0)
+	m.container.ExitCode = exitCode.ExitCode
+	m.resetMonitor(err == nil && exitCode.ExitCode == 0)
 	m.container.LogEvent("die")
 	m.resetContainer(true)
 	return err
@@ -335,7 +337,7 @@ func (m *containerMonitor) restoreCallback(processConfig *execdriver.ProcessConf
 		// Write config.json and hostconfig.json files
 		// to /var/lib/docker/containers/<ID>.
 		if err := m.container.ToDisk(); err != nil {
-			log.Debugf("%s", err)
+			logrus.Debugf("%s", err)
 		}
 	}
 }

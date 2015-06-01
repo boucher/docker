@@ -25,6 +25,7 @@ import (
 	sysinfo "github.com/docker/docker/pkg/system"
 	"github.com/docker/docker/pkg/term"
 	"github.com/docker/docker/pkg/version"
+	"github.com/docker/docker/runconfig"
 	"github.com/kr/pty"
 	"github.com/opencontainers/runc/libcontainer"
 	"github.com/opencontainers/runc/libcontainer/cgroups"
@@ -560,11 +561,11 @@ func (d *Driver) Unpause(c *execdriver.Command) error {
 	return err
 }
 
-func (d *driver) Checkpoint(c *execdriver.Command, opts *libcontainer.CriuOpts) error {
+func (d *driver) Checkpoint(c *execdriver.Command, opts *runconfig.CriuConfig) error {
 	return fmt.Errorf("Checkpointing lxc containers not supported yet\n")
 }
 
-func (d *driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback, opts *libcontainer.CriuOpts, forceRestore bool) (execdriver.ExitStatus, error) {
+func (d *driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback, opts *runconfig.CriuConfig, forceRestore bool) (execdriver.ExitStatus, error) {
 	return execdriver.ExitStatus{ExitCode: 0}, fmt.Errorf("Restoring lxc containers not supported yet\n")
 }
 

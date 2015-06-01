@@ -11,6 +11,7 @@ import (
 	"github.com/docker/docker/autogen/dockerversion"
 	"github.com/docker/docker/daemon/execdriver"
 	"github.com/docker/docker/pkg/parsers"
+	"github.com/docker/docker/runconfig"
 )
 
 // This is a daemon development variable only and should not be
@@ -92,4 +93,12 @@ func setupEnvironmentVariables(a []string) map[string]string {
 		}
 	}
 	return r
+}
+
+func (d *driver) Checkpoint(c *execdriver.Command, opts *runconfig.CriuConfig) error {
+	return fmt.Errorf("Windows: Containers cannot be checkpointed")
+}
+
+func (d *driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback, opts *runconfig.CriuConfig, forceRestore bool) (execdriver.ExitStatus, error) {
+	return execdriver.ExitStatus{ExitCode: 0}, fmt.Errorf("Windows: Containers cannot be restored")
 }

@@ -8,6 +8,7 @@ import (
 
 	// TODO Windows: Factor out ulimit
 	"github.com/docker/docker/pkg/ulimit"
+	"github.com/docker/docker/runconfig"
 	"github.com/opencontainers/runc/libcontainer"
 	"github.com/opencontainers/runc/libcontainer/configs"
 )
@@ -72,9 +73,11 @@ type Driver interface {
 	// Unpause unpauses a container.
 	Unpause(c *Command) error
 
-	Checkpoint(c *Command, opts *libcontainer.CriuOpts) error
+	// Checkpoints a container (with criu).
+	Checkpoint(c *Command, opts *runconfig.CriuConfig) error
 
-	Restore(c *Command, pipes *Pipes, restoreCallback RestoreCallback, opts *libcontainer.CriuOpts, forceRestore bool) (ExitStatus, error)
+	// Restores a checkpoint image into a container (with criu).
+	Restore(c *Command, pipes *Pipes, restoreCallback RestoreCallback, opts *runconfig.CriuConfig, forceRestore bool) (ExitStatus, error)
 
 	// Name returns the name of the driver.
 	Name() string
