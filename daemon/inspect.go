@@ -64,16 +64,18 @@ func (daemon *Daemon) getInspectData(container *Container) (*types.ContainerJSON
 	}
 
 	containerState := &types.ContainerState{
-		Running:    container.State.Running,
-		Paused:     container.State.Paused,
-		Restarting: container.State.Restarting,
-		OOMKilled:  container.State.OOMKilled,
-		Dead:       container.State.Dead,
-		Pid:        container.State.Pid,
-		ExitCode:   container.State.ExitCode,
-		Error:      container.State.Error,
-		StartedAt:  container.State.StartedAt,
-		FinishedAt: container.State.FinishedAt,
+		Running:        container.State.Running,
+		Paused:         container.State.Paused,
+		Checkpointed:   container.State.Checkpointed,
+		Restarting:     container.State.Restarting,
+		OOMKilled:      container.State.OOMKilled,
+		Dead:           container.State.Dead,
+		Pid:            container.State.Pid,
+		ExitCode:       container.State.ExitCode,
+		Error:          container.State.Error,
+		StartedAt:      container.State.StartedAt,
+		FinishedAt:     container.State.FinishedAt,
+		CheckpointedAt: container.State.CheckpointedAt,
 	}
 
 	volumes := make(map[string]string)
