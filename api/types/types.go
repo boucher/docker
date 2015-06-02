@@ -188,16 +188,18 @@ type ExecStartCheck struct {
 }
 
 type ContainerState struct {
-	Running    bool
-	Paused     bool
-	Restarting bool
-	OOMKilled  bool
-	Dead       bool
-	Pid        int
-	ExitCode   int
-	Error      string
-	StartedAt  time.Time
-	FinishedAt time.Time
+	Running        bool
+	Paused         bool
+	Checkpointed   bool
+	Restarting     bool
+	OOMKilled      bool
+	Dead           bool
+	Pid            int
+	ExitCode       int
+	Error          string
+	StartedAt      time.Time
+	FinishedAt     time.Time
+	CheckpointedAt time.Time
 }
 
 // GET "/containers/{name:.*}/json"
