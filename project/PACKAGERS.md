@@ -303,6 +303,9 @@ by having support for them in the kernel or userspace. A few examples include:
   least the "auplink" utility from aufs-tools)
 * BTRFS graph driver (requires BTRFS support enabled in the kernel)
 * ZFS graph driver (requires userspace zfs-utils and a corresponding kernel module)
+* Checkpoint/Restore containers:
+  - requires criu version 1.5.2 or later (criu.org)
+  - requires kernel version 3.19 or later if using overlay-fs
 
 ## Daemon Init Script
 
