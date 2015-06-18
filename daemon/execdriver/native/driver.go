@@ -141,8 +141,11 @@ func (d *driver) Run(c *execdriver.Command, pipes *execdriver.Pipes, startCallba
 	d.activeContainers[c.ID] = cont
 	d.Unlock()
 	defer func() {
-		cont.Destroy()
-		d.cleanContainer(c.ID)
+		status, err := cont.Status()
+		if err != nil || status != libcontainer.Checkpointed {
+			cont.Destroy()
+			d.cleanContainer(c.ID)
+		}
 	}()
 
 	if err := cont.Start(p); err != nil {
