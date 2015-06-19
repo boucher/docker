@@ -758,18 +758,32 @@ func (container *Container) AllocateNetwork(restoring bool) error {
 		return fmt.Errorf("error locating network with name %s: %v", string(mode), err)
 	}
 
-	createOptions, err := container.buildCreateEndpointOptions(restoring)
-	if err != nil {
-		return err
-	}
+	var ep libnetwork.Endpoint
+	if restoring == true {
+		// Use existing Endpoint for a checkpointed container
+		for _, endpoint := range n.Endpoints() {
+			if endpoint.ID() == container.NetworkSettings.EndpointID {
+				ep = endpoint
+			}
+		}
+		if ep == nil {
+			return fmt.Errorf("Fail to find the Endpoint for the checkpointed container")
+		}
+	} else {
 
-	ep, err := n.CreateEndpoint(container.Name, createOptions...)
-	if err != nil {
-		return err
-	}
+		createOptions, err := container.buildCreateEndpointOptions(restoring)
+		if err != nil {
+			return err
+		}
 
-	if err := container.updateNetworkSettings(n, ep); err != nil {
-		return err
+		ep, err = n.CreateEndpoint(container.Name, createOptions...)
+		if err != nil {
+			return err
+		}
+
+		if err := container.updateNetworkSettings(n, ep); err != nil {
+			return err
+		}
 	}
 
 	joinOptions, err := container.buildJoinOptions()
@@ -916,7 +930,7 @@ func (container *Container) getNetworkedContainer() (*Container, error) {
 	}
 }
 
-func (container *Container) ReleaseNetwork() {
+func (container *Container) ReleaseNetwork(is_checkpoint bool) {
 	if container.hostConfig.NetworkMode.IsContainer() || container.daemon.config.DisableNetwork {
 		return
 	}
@@ -941,6 +955,10 @@ func (container *Container) ReleaseNetwork() {
 
 	if err := ep.Leave(container.ID); err != nil {
 		logrus.Errorf("leaving endpoint failed: %v", err)
+	}
+
+	if is_checkpoint == true {
+		return
 	}
 
 	if err := ep.Delete(); err != nil {

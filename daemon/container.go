@@ -341,7 +341,7 @@ func (container *Container) cleanup() {
 	if container.IsCheckpointed() {
 		logrus.Debugf("not calling ReleaseNetwork() for checkpointed container %s", container.ID)
 	} else {
-		container.ReleaseNetwork()
+		container.ReleaseNetwork(false)
 	}
 
 	disableAllActiveLinks(container)
@@ -607,7 +607,7 @@ func (container *Container) Checkpoint(opts *runconfig.CriuConfig) error {
 	}
 
 	if opts.LeaveRunning == false {
-		container.ReleaseNetwork()
+		container.ReleaseNetwork(true)
 	}
 	return nil
 }
