@@ -51,7 +51,7 @@ func (container *Container) createDaemonEnvironment(linkedEnv []string) []string
 	return nil
 }
 
-func (container *Container) initializeNetworking() error {
+func (container *Container) initializeNetworking(restoring bool) error {
 	return nil
 }
 

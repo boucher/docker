@@ -117,6 +117,9 @@ type Container struct {
 	SizeRootFs int `json:",omitempty"`
 	Labels     map[string]string
 	Status     string
+	HostConfig struct {
+		NetworkMode string `json:",omitempty"`
+	}
 }
 
 // POST "/containers/"+containerID+"/copy"
@@ -153,6 +156,8 @@ type Info struct {
 	CpuCfsPeriod       bool
 	CpuCfsQuota        bool
 	IPv4Forwarding     bool
+	BridgeNfIptables   bool
+	BridgeNfIp6tables  bool
 	Debug              bool
 	NFd                int
 	OomKillDisable     bool

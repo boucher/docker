@@ -32,6 +32,8 @@ type CommonConfig struct {
 	Pidfile        string
 	Root           string
 	TrustKeyPath   string
+	DefaultNetwork string
+	NetworkKVStore string
 }
 
 // InstallCommonFlags adds command-line options to the top-level flag parser for

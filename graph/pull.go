@@ -219,8 +219,18 @@ func (s *TagStore) pullRepository(r *registry.Session, out io.Writer, repoInfo *
 	}
 
 	logrus.Debugf("Retrieving the tag list")
-	tagsList, err := r.GetRemoteTags(repoData.Endpoints, repoInfo.RemoteName)
+	tagsList := make(map[string]string)
+	if askedTag == "" {
+		tagsList, err = r.GetRemoteTags(repoData.Endpoints, repoInfo.RemoteName)
+	} else {
+		var tagId string
+		tagId, err = r.GetRemoteTag(repoData.Endpoints, repoInfo.RemoteName, askedTag)
+		tagsList[askedTag] = tagId
+	}
 	if err != nil {
+		if err == registry.ErrRepoNotFound && askedTag != "" {
+			return fmt.Errorf("Tag %s not found in repository %s", askedTag, repoInfo.CanonicalName)
+		}
 		logrus.Errorf("unable to get remote tags: %s", err)
 		return err
 	}
@@ -470,6 +480,10 @@ func (s *TagStore) pullV2Repository(r *registry.Session, out io.Writer, repoInfo
 	if err != nil {
 		return fmt.Errorf("error getting authorization: %s", err)
 	}
+	if !auth.CanAuthorizeV2() {
+		return ErrV2RegistryUnavailable
+	}
+
 	var layersDownloaded bool
 	if tag == "" {
 		logrus.Debugf("Pulling tag list from V2 registry for %s", repoInfo.CanonicalName)

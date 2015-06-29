@@ -5,30 +5,31 @@ package daemon
 import (
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/autogen/dockerversion"
 	"github.com/docker/docker/daemon/graphdriver"
-	"github.com/docker/docker/graph"
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/fileutils"
 	"github.com/docker/docker/pkg/parsers/kernel"
+	"github.com/docker/docker/pkg/system"
 	"github.com/docker/docker/runconfig"
 	"github.com/docker/docker/utils"
 	volumedrivers "github.com/docker/docker/volume/drivers"
 	"github.com/docker/docker/volume/local"
 	"github.com/docker/libcontainer/label"
 	"github.com/docker/libnetwork"
+	nwapi "github.com/docker/libnetwork/api"
+	nwconfig "github.com/docker/libnetwork/config"
 	"github.com/docker/libnetwork/netlabel"
 	"github.com/docker/libnetwork/options"
 )
-
-const runDir = "/var/run/docker"
-const defaultVolumesPathName = "volumes"
 
 func (daemon *Daemon) Changes(container *Container) ([]archive.Change, error) {
 	initID := fmt.Sprintf("%s-init", container.ID)
@@ -81,7 +82,7 @@ func (daemon *Daemon) createRootfs(container *Container) error {
 	}
 	defer daemon.driver.Put(initID)
 
-	if err := graph.SetupInitLayer(initPath); err != nil {
+	if err := setupInitLayer(initPath); err != nil {
 		return err
 	}
 
@@ -263,8 +264,45 @@ func isNetworkDisabled(config *Config) bool {
 	return config.Bridge.Iface == disableNetworkBridge
 }
 
+func networkOptions(dconfig *Config) ([]nwconfig.Option, error) {
+	options := []nwconfig.Option{}
+	if dconfig == nil {
+		return options, nil
+	}
+	if strings.TrimSpace(dconfig.DefaultNetwork) != "" {
+		dn := strings.Split(dconfig.DefaultNetwork, ":")
+		if len(dn) < 2 {
+			return nil, fmt.Errorf("default network daemon config must be of the form NETWORKDRIVER:NETWORKNAME")
+		}
+		options = append(options, nwconfig.OptionDefaultDriver(dn[0]))
+		options = append(options, nwconfig.OptionDefaultNetwork(strings.Join(dn[1:], ":")))
+	} else {
+		dd := runconfig.DefaultDaemonNetworkMode()
+		dn := runconfig.DefaultDaemonNetworkMode().NetworkName()
+		options = append(options, nwconfig.OptionDefaultDriver(string(dd)))
+		options = append(options, nwconfig.OptionDefaultNetwork(dn))
+	}
+
+	if strings.TrimSpace(dconfig.NetworkKVStore) != "" {
+		kv := strings.Split(dconfig.NetworkKVStore, ":")
+		if len(kv) < 2 {
+			return nil, fmt.Errorf("kv store daemon config must be of the form KV-PROVIDER:KV-URL")
+		}
+		options = append(options, nwconfig.OptionKVProvider(kv[0]))
+		options = append(options, nwconfig.OptionKVProviderURL(strings.Join(kv[1:], ":")))
+	}
+
+	options = append(options, nwconfig.OptionLabels(dconfig.Labels))
+	return options, nil
+}
+
 func initNetworkController(config *Config) (libnetwork.NetworkController, error) {
-	controller, err := libnetwork.New()
+	netOptions, err := networkOptions(config)
+	if err != nil {
+		return nil, err
+	}
+
+	controller, err := libnetwork.New(netOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("error obtaining controller instance: %v", err)
 	}
@@ -359,4 +397,66 @@ func initNetworkController(config *Config) (libnetwork.NetworkController, error)
 	}
 
 	return controller, nil
+}
+
+// setupInitLayer populates a directory with mountpoints suitable
+// for bind-mounting dockerinit into the container. The mountpoint is simply an
+// empty file at /.dockerinit
+//
+// This extra layer is used by all containers as the top-most ro layer. It protects
+// the container from unwanted side-effects on the rw layer.
+func setupInitLayer(initLayer string) error {
+	for pth, typ := range map[string]string{
+		"/dev/pts":         "dir",
+		"/dev/shm":         "dir",
+		"/proc":            "dir",
+		"/sys":             "dir",
+		"/.dockerinit":     "file",
+		"/.dockerenv":      "file",
+		"/etc/resolv.conf": "file",
+		"/etc/hosts":       "file",
+		"/etc/hostname":    "file",
+		"/dev/console":     "file",
+		"/etc/mtab":        "/proc/mounts",
+	} {
+		parts := strings.Split(pth, "/")
+		prev := "/"
+		for _, p := range parts[1:] {
+			prev = filepath.Join(prev, p)
+			syscall.Unlink(filepath.Join(initLayer, prev))
+		}
+
+		if _, err := os.Stat(filepath.Join(initLayer, pth)); err != nil {
+			if os.IsNotExist(err) {
+				if err := system.MkdirAll(filepath.Join(initLayer, filepath.Dir(pth)), 0755); err != nil {
+					return err
+				}
+				switch typ {
+				case "dir":
+					if err := system.MkdirAll(filepath.Join(initLayer, pth), 0755); err != nil {
+						return err
+					}
+				case "file":
+					f, err := os.OpenFile(filepath.Join(initLayer, pth), os.O_CREATE, 0755)
+					if err != nil {
+						return err
+					}
+					f.Close()
+				default:
+					if err := os.Symlink(typ, filepath.Join(initLayer, pth)); err != nil {
+						return err
+					}
+				}
+			} else {
+				return err
+			}
+		}
+	}
+
+	// Layer is ready to use, if it wasn't before.
+	return nil
+}
+
+func (daemon *Daemon) NetworkApiRouter() func(w http.ResponseWriter, req *http.Request) {
+	return nwapi.NewHTTPHandler(daemon.netController)
 }

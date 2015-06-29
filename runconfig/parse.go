@@ -72,7 +72,7 @@ func Parse(cmd *flag.FlagSet, args []string) (*Config, *HostConfig, *flag.FlagSe
 		flCpusetMems      = cmd.String([]string{"-cpuset-mems"}, "", "MEMs in which to allow execution (0-3, 0,1)")
 		flCpuQuota        = cmd.Int64([]string{"-cpu-quota"}, 0, "Limit the CPU CFS quota")
 		flBlkioWeight     = cmd.Int64([]string{"-blkio-weight"}, 0, "Block IO (relative weight), between 10 and 1000")
-		flNetMode         = cmd.String([]string{"-net"}, "bridge", "Set the Network mode for the container")
+		flNetMode         = cmd.String([]string{"-net"}, "default", "Set the Network mode for the container")
 		flMacAddress      = cmd.String([]string{"-mac-address"}, "", "Container MAC address (e.g. 92:d0:c6:0a:29:33)")
 		flIpcMode         = cmd.String([]string{"-ipc"}, "", "IPC namespace to use")
 		flRestartPolicy   = cmd.String([]string{"-restart"}, "no", "Restart policy to apply when a container exits")
@@ -451,25 +451,6 @@ func ParseRestartPolicy(policy string) (RestartPolicy, error) {
 	return p, nil
 }
 
-// options will come in the format of name.key=value or name.option
-func parseDriverOpts(opts opts.ListOpts) (map[string][]string, error) {
-	out := make(map[string][]string, len(opts.GetAll()))
-	for _, o := range opts.GetAll() {
-		parts := strings.SplitN(o, ".", 2)
-		if len(parts) < 2 {
-			return nil, fmt.Errorf("invalid opt format %s", o)
-		} else if strings.TrimSpace(parts[0]) == "" {
-			return nil, fmt.Errorf("key cannot be empty %s", o)
-		}
-		values, exists := out[parts[0]]
-		if !exists {
-			values = []string{}
-		}
-		out[parts[0]] = append(values, parts[1])
-	}
-	return out, nil
-}
-
 func parseKeyValueOpts(opts opts.ListOpts) ([]KeyValuePair, error) {
 	out := make([]KeyValuePair, opts.Len())
 	for i, o := range opts.GetAll() {
@@ -485,7 +466,7 @@ func parseKeyValueOpts(opts opts.ListOpts) ([]KeyValuePair, error) {
 func parseNetMode(netMode string) (NetworkMode, error) {
 	parts := strings.Split(netMode, ":")
 	switch mode := parts[0]; mode {
-	case "bridge", "none", "host":
+	case "default", "bridge", "none", "host":
 	case "container":
 		if len(parts) < 2 || parts[1] == "" {
 			return "", fmt.Errorf("invalid container format container:<name|id>")
