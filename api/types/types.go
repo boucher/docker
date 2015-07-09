@@ -206,31 +206,18 @@ type ExecStartCheck struct {
 }
 
 type ContainerState struct {
-<<<<<<< HEAD
-	Running    bool
-	Paused     bool
-	Restarting bool
-	OOMKilled  bool
-	Dead       bool
-	Pid        int
-	ExitCode   int
-	Error      string
-	StartedAt  string
-	FinishedAt string
-=======
 	Running        bool
-	Paused         bool
+	Paused    	   bool
 	Checkpointed   bool
-	Restarting     bool
-	OOMKilled      bool
-	Dead           bool
-	Pid            int
-	ExitCode       int
-	Error          string
-	StartedAt      time.Time
-	FinishedAt     time.Time
-	CheckpointedAt time.Time
->>>>>>> Add compilation steps for Criu to the Dockerfile
+	Restarting 	   bool
+	OOMKilled  	   bool
+	Dead       	   bool
+	Pid        	   int
+	ExitCode   	   int
+	Error      	   string
+	StartedAt  	   string
+	FinishedAt 	   string
+	CheckpointedAt string
 }
 
 // GET "/containers/{name:.*}/json"
