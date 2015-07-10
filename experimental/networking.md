@@ -2,7 +2,7 @@
 
 In this feature:
 
-- `network` and `service` become a first class objects in the Docker UI
+- `network` and `service` become first class objects in the Docker UI
   - one can now create networks, publish services on that network and attach containers to the services
 - Native multi-host networking
   - `network` and `service` objects are globally significant and provides multi-host container connectivity natively
@@ -11,7 +11,7 @@ In this feature:
 - Batteries included but removable
   - Docker provides inbuilt native multi-host networking by default & can be swapped by any remote driver provided by external plugins.
 
-This is an experimental feature. For information on installing and using experimental features, see [the experimental feature overview](experimental.md).
+This is an experimental feature. For information on installing and using experimental features, see [the experimental feature overview](README.md).
 
 ## Using Networks
 

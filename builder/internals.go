@@ -21,6 +21,7 @@ import (
 
 	"github.com/Sirupsen/logrus"
 	"github.com/docker/docker/builder/parser"
+	"github.com/docker/docker/cliconfig"
 	"github.com/docker/docker/daemon"
 	"github.com/docker/docker/graph"
 	imagepkg "github.com/docker/docker/image"
@@ -107,8 +108,14 @@ func (b *Builder) commit(id string, autoCmd *runconfig.Command, comment string) 
 	autoConfig := *b.Config
 	autoConfig.Cmd = autoCmd
 
+	commitCfg := &daemon.ContainerCommitConfig{
+		Author: b.maintainer,
+		Pause:  true,
+		Config: &autoConfig,
+	}
+
 	// Commit the container
-	image, err := b.Daemon.Commit(container, "", "", "", b.maintainer, true, &autoConfig)
+	image, err := b.Daemon.Commit(container, commitCfg)
 	if err != nil {
 		return err
 	}
@@ -454,15 +461,19 @@ func (b *Builder) pullImage(name string) (*imagepkg.Image, error) {
 		tag = "latest"
 	}
 
-	pullRegistryAuth := b.AuthConfig
-	if len(b.ConfigFile.AuthConfigs) > 0 {
+	pullRegistryAuth := &cliconfig.AuthConfig{}
+	if len(b.AuthConfigs) > 0 {
 		// The request came with a full auth config file, we prefer to use that
 		repoInfo, err := b.Daemon.RegistryService.ResolveRepository(remote)
 		if err != nil {
 			return nil, err
 		}
-		resolvedAuth := registry.ResolveAuthConfig(b.ConfigFile, repoInfo.Index)
-		pullRegistryAuth = &resolvedAuth
+
+		resolvedConfig := registry.ResolveAuthConfig(
+			&cliconfig.ConfigFile{AuthConfigs: b.AuthConfigs},
+			repoInfo.Index,
+		)
+		pullRegistryAuth = &resolvedConfig
 	}
 
 	imagePullConfig := &graph.ImagePullConfig{
@@ -489,7 +500,8 @@ func (b *Builder) processImageFrom(img *imagepkg.Image) error {
 		b.Config = img.Config
 	}
 
-	if len(b.Config.Env) == 0 {
+	// The default path will be blank on Windows (set by HCS)
+	if len(b.Config.Env) == 0 && daemon.DefaultPathEnv != "" {
 		b.Config.Env = append(b.Config.Env, "PATH="+daemon.DefaultPathEnv)
 	}
 

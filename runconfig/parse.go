@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/docker/docker/nat"
 	"github.com/docker/docker/opts"
 	flag "github.com/docker/docker/pkg/mflag"
+	"github.com/docker/docker/pkg/nat"
 	"github.com/docker/docker/pkg/parsers"
 	"github.com/docker/docker/pkg/ulimit"
 	"github.com/docker/docker/pkg/units"
@@ -23,6 +23,19 @@ var (
 	ErrConflictNetworkPublishPorts      = fmt.Errorf("Conflicting options: -p, -P, --publish-all, --publish and the network mode (--net)")
 	ErrConflictNetworkExposePorts       = fmt.Errorf("Conflicting options: --expose and the network mode (--expose)")
 )
+
+// validateNM is the set of fields passed to validateNetMode()
+type validateNM struct {
+	netMode      NetworkMode
+	flHostname   *string
+	flLinks      opts.ListOpts
+	flDns        opts.ListOpts
+	flExtraHosts opts.ListOpts
+	flMacAddress *string
+	flPublish    opts.ListOpts
+	flPublishAll *bool
+	flExpose     opts.ListOpts
+}
 
 func Parse(cmd *flag.FlagSet, args []string) (*Config, *HostConfig, *flag.FlagSet, error) {
 	var (
@@ -121,51 +134,35 @@ func Parse(cmd *flag.FlagSet, args []string) (*Config, *HostConfig, *flag.FlagSe
 		return nil, nil, cmd, fmt.Errorf("--net: invalid net mode: %v", err)
 	}
 
-	if (netMode.IsHost() || netMode.IsContainer()) && *flHostname != "" {
-		return nil, nil, cmd, ErrConflictNetworkHostname
+	vals := validateNM{
+		netMode:      netMode,
+		flHostname:   flHostname,
+		flLinks:      flLinks,
+		flDns:        flDns,
+		flExtraHosts: flExtraHosts,
+		flMacAddress: flMacAddress,
+		flPublish:    flPublish,
+		flPublishAll: flPublishAll,
+		flExpose:     flExpose,
 	}
 
-	if netMode.IsHost() && flLinks.Len() > 0 {
-		return nil, nil, cmd, ErrConflictHostNetworkAndLinks
+	if err := validateNetMode(&vals); err != nil {
+		return nil, nil, cmd, err
 	}
 
-	if netMode.IsContainer() && flLinks.Len() > 0 {
-		return nil, nil, cmd, ErrConflictContainerNetworkAndLinks
-	}
-
-	if (netMode.IsHost() || netMode.IsContainer()) && flDns.Len() > 0 {
-		return nil, nil, cmd, ErrConflictNetworkAndDns
-	}
-
-	if (netMode.IsContainer() || netMode.IsHost()) && flExtraHosts.Len() > 0 {
-		return nil, nil, cmd, ErrConflictNetworkHosts
-	}
-
-	if (netMode.IsContainer() || netMode.IsHost()) && *flMacAddress != "" {
-		return nil, nil, cmd, ErrConflictContainerNetworkAndMac
-	}
-
-	if netMode.IsContainer() && (flPublish.Len() > 0 || *flPublishAll == true) {
-		return nil, nil, cmd, ErrConflictNetworkPublishPorts
-	}
-
-	if netMode.IsContainer() && flExpose.Len() > 0 {
-		return nil, nil, cmd, ErrConflictNetworkExposePorts
-	}
 	// Validate the input mac address
 	if *flMacAddress != "" {
 		if _, err := opts.ValidateMACAddress(*flMacAddress); err != nil {
 			return nil, nil, cmd, fmt.Errorf("%s is not a valid mac address", *flMacAddress)
 		}
 	}
-
-	// If neither -d or -a are set, attach to everything by default
+	if *flStdin {
+		attachStdin = true
+	}
+	// If -a is not set attach to the output stdio
 	if flAttach.Len() == 0 {
 		attachStdout = true
 		attachStderr = true
-		if *flStdin {
-			attachStdin = true
-		}
 	}
 
 	var flMemory int64
@@ -355,8 +352,8 @@ func Parse(cmd *flag.FlagSet, args []string) (*Config, *HostConfig, *flag.FlagSe
 		PidMode:         pidMode,
 		UTSMode:         utsMode,
 		Devices:         deviceMappings,
-		CapAdd:          flCapAdd.GetAll(),
-		CapDrop:         flCapDrop.GetAll(),
+		CapAdd:          NewCapList(flCapAdd.GetAll()),
+		CapDrop:         NewCapList(flCapDrop.GetAll()),
 		RestartPolicy:   restartPolicy,
 		SecurityOpt:     flSecurityOpt.GetAll(),
 		ReadonlyRootfs:  *flReadonlyRootfs,
@@ -430,12 +427,15 @@ func ParseRestartPolicy(policy string) (RestartPolicy, error) {
 	p.Name = name
 	switch name {
 	case "always":
-		if len(parts) == 2 {
+		if len(parts) > 1 {
 			return p, fmt.Errorf("maximum restart count not valid with restart policy of \"always\"")
 		}
 	case "no":
 		// do nothing
 	case "on-failure":
+		if len(parts) > 2 {
+			return p, fmt.Errorf("restart count format is not valid, usage: 'on-failure:N' or 'on-failure'")
+		}
 		if len(parts) == 2 {
 			count, err := strconv.Atoi(parts[1])
 			if err != nil {
@@ -461,20 +461,6 @@ func parseKeyValueOpts(opts opts.ListOpts) ([]KeyValuePair, error) {
 		out[i] = KeyValuePair{Key: k, Value: v}
 	}
 	return out, nil
-}
-
-func parseNetMode(netMode string) (NetworkMode, error) {
-	parts := strings.Split(netMode, ":")
-	switch mode := parts[0]; mode {
-	case "default", "bridge", "none", "host":
-	case "container":
-		if len(parts) < 2 || parts[1] == "" {
-			return "", fmt.Errorf("invalid container format container:<name|id>")
-		}
-	default:
-		return "", fmt.Errorf("invalid --net: %s", netMode)
-	}
-	return NetworkMode(netMode), nil
 }
 
 func ParseDevice(device string) (DeviceMapping, error) {

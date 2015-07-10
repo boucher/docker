@@ -17,6 +17,8 @@ import (
 	"github.com/docker/docker/daemon/graphdriver"
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/fileutils"
+	"github.com/docker/docker/pkg/nat"
+	"github.com/docker/docker/pkg/parsers"
 	"github.com/docker/docker/pkg/parsers/kernel"
 	"github.com/docker/docker/pkg/system"
 	"github.com/docker/docker/runconfig"
@@ -128,6 +130,12 @@ func (daemon *Daemon) verifyContainerSettings(hostConfig *runconfig.HostConfig, 
 		return warnings, nil
 	}
 
+	for port := range hostConfig.PortBindings {
+		_, portStr := nat.SplitProtoPort(string(port))
+		if _, err := nat.ParsePort(portStr); err != nil {
+			return warnings, fmt.Errorf("Invalid port specification: %s", portStr)
+		}
+	}
 	if hostConfig.LxcConf.Len() > 0 && !strings.Contains(daemon.ExecutionDriver().Name(), "lxc") {
 		return warnings, fmt.Errorf("Cannot use --lxc-conf with execdriver: %s", daemon.ExecutionDriver().Name())
 	}
@@ -260,7 +268,7 @@ func configureSysInit(config *Config) (string, error) {
 	return sysInitPath, nil
 }
 
-func isNetworkDisabled(config *Config) bool {
+func isBridgeNetworkDisabled(config *Config) bool {
 	return config.Bridge.Iface == disableNetworkBridge
 }
 
@@ -328,12 +336,22 @@ func initNetworkController(config *Config) (libnetwork.NetworkController, error)
 		return nil, fmt.Errorf("Error creating default \"host\" network: %v", err)
 	}
 
-	// Initialize default driver "bridge"
+	if !config.DisableBridge {
+		// Initialize default driver "bridge"
+		if err := initBridgeDriver(controller, config); err != nil {
+			return nil, err
+		}
+	}
+
+	return controller, nil
+}
+
+func initBridgeDriver(controller libnetwork.NetworkController, config *Config) error {
 	option := options.Generic{
 		"EnableIPForwarding": config.Bridge.EnableIPForward}
 
 	if err := controller.ConfigureNetworkDriver("bridge", options.Generic{netlabel.GenericData: option}); err != nil {
-		return nil, fmt.Errorf("Error initializing bridge driver: %v", err)
+		return fmt.Errorf("Error initializing bridge driver: %v", err)
 	}
 
 	netOption := options.Generic{
@@ -348,7 +366,7 @@ func initNetworkController(config *Config) (libnetwork.NetworkController, error)
 	if config.Bridge.IP != "" {
 		ip, bipNet, err := net.ParseCIDR(config.Bridge.IP)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		bipNet.IP = ip
@@ -358,7 +376,7 @@ func initNetworkController(config *Config) (libnetwork.NetworkController, error)
 	if config.Bridge.FixedCIDR != "" {
 		_, fCIDR, err := net.ParseCIDR(config.Bridge.FixedCIDR)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		netOption["FixedCIDR"] = fCIDR
@@ -367,7 +385,7 @@ func initNetworkController(config *Config) (libnetwork.NetworkController, error)
 	if config.Bridge.FixedCIDRv6 != "" {
 		_, fCIDRv6, err := net.ParseCIDR(config.Bridge.FixedCIDRv6)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		netOption["FixedCIDRv6"] = fCIDRv6
@@ -387,16 +405,15 @@ func initNetworkController(config *Config) (libnetwork.NetworkController, error)
 	}
 
 	// Initialize default network on "bridge" with the same name
-	_, err = controller.NewNetwork("bridge", "bridge",
+	_, err := controller.NewNetwork("bridge", "bridge",
 		libnetwork.NetworkOptionGeneric(options.Generic{
 			netlabel.GenericData: netOption,
 			netlabel.EnableIPv6:  config.Bridge.EnableIPv6,
 		}))
 	if err != nil {
-		return nil, fmt.Errorf("Error creating default \"bridge\" network: %v", err)
+		return fmt.Errorf("Error creating default \"bridge\" network: %v", err)
 	}
-
-	return controller, nil
+	return nil
 }
 
 // setupInitLayer populates a directory with mountpoints suitable
@@ -459,4 +476,45 @@ func setupInitLayer(initLayer string) error {
 
 func (daemon *Daemon) NetworkApiRouter() func(w http.ResponseWriter, req *http.Request) {
 	return nwapi.NewHTTPHandler(daemon.netController)
+}
+
+func (daemon *Daemon) RegisterLinks(container *Container, hostConfig *runconfig.HostConfig) error {
+
+	if hostConfig == nil || hostConfig.Links == nil {
+		return nil
+	}
+
+	for _, l := range hostConfig.Links {
+		name, alias, err := parsers.ParseLink(l)
+		if err != nil {
+			return err
+		}
+		child, err := daemon.Get(name)
+		if err != nil {
+			//An error from daemon.Get() means this name could not be found
+			return fmt.Errorf("Could not get container for %s", name)
+		}
+		for child.hostConfig.NetworkMode.IsContainer() {
+			parts := strings.SplitN(string(child.hostConfig.NetworkMode), ":", 2)
+			child, err = daemon.Get(parts[1])
+			if err != nil {
+				return fmt.Errorf("Could not get container for %s", parts[1])
+			}
+		}
+		if child.hostConfig.NetworkMode.IsHost() {
+			return runconfig.ErrConflictHostNetworkAndLinks
+		}
+		if err := daemon.RegisterLink(container, child, alias); err != nil {
+			return err
+		}
+	}
+
+	// After we load all the links into the daemon
+	// set them to nil on the hostconfig
+	hostConfig.Links = nil
+	if err := container.WriteHostConfig(); err != nil {
+		return err
+	}
+
+	return nil
 }

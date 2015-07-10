@@ -18,10 +18,10 @@ import (
 	"github.com/docker/docker/daemon/execdriver"
 	"github.com/docker/docker/daemon/network"
 	"github.com/docker/docker/links"
-	"github.com/docker/docker/nat"
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/directory"
 	"github.com/docker/docker/pkg/ioutils"
+	"github.com/docker/docker/pkg/nat"
 	"github.com/docker/docker/pkg/stringid"
 	"github.com/docker/docker/pkg/ulimit"
 	"github.com/docker/docker/runconfig"
@@ -297,8 +297,8 @@ func populateCommand(c *Container, env []string) error {
 		Resources:          resources,
 		AllowedDevices:     allowedDevices,
 		AutoCreatedDevices: autoCreatedDevices,
-		CapAdd:             c.hostConfig.CapAdd,
-		CapDrop:            c.hostConfig.CapDrop,
+		CapAdd:             c.hostConfig.CapAdd.Slice(),
+		CapDrop:            c.hostConfig.CapDrop.Slice(),
 		ProcessConfig:      processConfig,
 		ProcessLabel:       c.GetProcessLabel(),
 		MountLabel:         c.GetMountLabel(),
@@ -469,7 +469,7 @@ func (container *Container) buildJoinOptions() ([]libnetwork.EndpointOption, err
 			logrus.Error(err)
 		}
 
-		if c != nil && !container.daemon.config.DisableNetwork && container.hostConfig.NetworkMode.IsPrivate() {
+		if c != nil && !container.daemon.config.DisableBridge && container.hostConfig.NetworkMode.IsPrivate() {
 			logrus.Debugf("Update /etc/hosts of %s for alias %s with ip %s", c.ID, ref.Name, container.NetworkSettings.IPAddress)
 			joinOptions = append(joinOptions, libnetwork.JoinOptionParentUpdate(c.NetworkSettings.EndpointID, ref.Name, container.NetworkSettings.IPAddress))
 			if c.NetworkSettings.EndpointID != "" {
@@ -781,6 +781,11 @@ func (container *Container) secondaryNetworkRequired(primaryNetworkType string) 
 	case "bridge", "none", "host", "container":
 		return false
 	}
+
+	if container.daemon.config.DisableBridge {
+		return false
+	}
+
 	if container.Config.ExposedPorts != nil && len(container.Config.ExposedPorts) > 0 {
 		return true
 	}
@@ -809,6 +814,11 @@ func (container *Container) AllocateNetwork(isRestoring bool) error {
 		}
 	} else if service != "" {
 		return fmt.Errorf("conflicting options: publishing a service and network mode")
+	}
+
+	if runconfig.NetworkMode(networkDriver).IsBridge() && container.daemon.config.DisableBridge {
+		container.Config.NetworkDisabled = true
+		return nil
 	}
 
 	if service == "" {
@@ -903,10 +913,6 @@ func (container *Container) initializeNetworking(restoring bool) error {
 		container.Config.Hostname = nc.Config.Hostname
 		container.Config.Domainname = nc.Config.Domainname
 		return nil
-	}
-
-	if container.daemon.config.DisableNetwork {
-		container.Config.NetworkDisabled = true
 	}
 
 	if container.hostConfig.NetworkMode.IsHost() {
@@ -1007,13 +1013,7 @@ func (container *Container) getNetworkedContainer() (*Container, error) {
 }
 
 func (container *Container) ReleaseNetwork() {
-	if container.hostConfig.NetworkMode.IsContainer() || container.daemon.config.DisableNetwork {
-		return
-	}
-
-	err := container.daemon.netController.LeaveAll(container.ID)
-	if err != nil {
-		logrus.Errorf("Leave all failed for  %s: %v", container.ID, err)
+	if container.hostConfig.NetworkMode.IsContainer() || container.Config.NetworkDisabled {
 		return
 	}
 
@@ -1022,22 +1022,42 @@ func (container *Container) ReleaseNetwork() {
 
 	container.NetworkSettings = &network.Settings{}
 
+	if nid == "" || eid == "" {
+		return
+	}
+
+	n, err := container.daemon.netController.NetworkByID(nid)
+	if err != nil {
+		logrus.Errorf("error locating network id %s: %v", nid, err)
+		return
+	}
+
+	ep, err := n.EndpointByID(eid)
+	if err != nil {
+		logrus.Errorf("error locating endpoint id %s: %v", eid, err)
+		return
+	}
+
+	switch {
+	case container.hostConfig.NetworkMode.IsHost():
+		if err := ep.Leave(container.ID); err != nil {
+			logrus.Errorf("Error leaving endpoint id %s for container %s: %v", eid, container.ID, err)
+			return
+		}
+	default:
+		if err := container.daemon.netController.LeaveAll(container.ID); err != nil {
+			logrus.Errorf("Leave all failed for  %s: %v", container.ID, err)
+			return
+		}
+	}
+
 	// In addition to leaving all endpoints, delete implicitly created endpoint
-	if container.Config.PublishService == "" && eid != "" && nid != "" {
-		n, err := container.daemon.netController.NetworkByID(nid)
-		if err != nil {
-			logrus.Errorf("error locating network id %s: %v", nid, err)
-			return
-		}
-		ep, err := n.EndpointByID(eid)
-		if err != nil {
-			logrus.Errorf("error locating endpoint id %s: %v", eid, err)
-			return
-		}
+	if container.Config.PublishService == "" {
 		if err := ep.Delete(); err != nil {
 			logrus.Errorf("deleting endpoint failed: %v", err)
 		}
 	}
+
 }
 
 func disableAllActiveLinks(container *Container) {

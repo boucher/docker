@@ -10,8 +10,9 @@ import (
 	"github.com/docker/docker/pkg/archive"
 )
 
-// TODO Windows. A reasonable default at the moment.
-const DefaultPathEnv = `c:\windows\system32;c:\windows\system32\WindowsPowerShell\v1.0`
+// This is deliberately empty on Windows as the default path will be set by
+// the container. Docker has no context of what the default path should be.
+const DefaultPathEnv = ""
 
 type Container struct {
 	CommonContainer
@@ -48,7 +49,8 @@ func (container *Container) setupLinkedContainers() ([]string, error) {
 }
 
 func (container *Container) createDaemonEnvironment(linkedEnv []string) []string {
-	return nil
+	// On Windows, nothing to link. Just return the container environment.
+	return container.Config.Env
 }
 
 func (container *Container) initializeNetworking(restoring bool) error {
@@ -65,22 +67,17 @@ func populateCommand(c *Container, env []string) error {
 		Interface: nil,
 	}
 
-	// TODO Windows. Appropriate network mode (will refactor as part of
-	// libnetwork. For now, even through bridge not used, let it succeed to
-	// allow the Windows daemon to limp during its bring-up
 	parts := strings.SplitN(string(c.hostConfig.NetworkMode), ":", 2)
 	switch parts[0] {
+
 	case "none":
-	case "bridge", "": // empty string to support existing containers
+	case "default", "": // empty string to support existing containers
 		if !c.Config.NetworkDisabled {
 			network := c.NetworkSettings
 			en.Interface = &execdriver.NetworkInterface{
-				Bridge:     network.Bridge,
 				MacAddress: network.MacAddress,
 			}
 		}
-	case "host", "container":
-		return fmt.Errorf("unsupported network mode: %s", c.hostConfig.NetworkMode)
 	default:
 		return fmt.Errorf("invalid network mode: %s", c.hostConfig.NetworkMode)
 	}
@@ -114,8 +111,8 @@ func populateCommand(c *Container, env []string) error {
 		Network:        en,
 		Pid:            pid,
 		Resources:      resources,
-		CapAdd:         c.hostConfig.CapAdd,
-		CapDrop:        c.hostConfig.CapDrop,
+		CapAdd:         c.hostConfig.CapAdd.Slice(),
+		CapDrop:        c.hostConfig.CapDrop.Slice(),
 		ProcessConfig:  processConfig,
 		ProcessLabel:   c.GetProcessLabel(),
 		MountLabel:     c.GetMountLabel(),

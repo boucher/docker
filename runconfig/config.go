@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/docker/docker/nat"
+	"github.com/docker/docker/pkg/nat"
 )
 
 // Entrypoint encapsulates the container entrypoint.
@@ -32,7 +32,11 @@ func (e *Entrypoint) UnmarshalJSON(b []byte) error {
 
 	p := make([]string, 0, 1)
 	if err := json.Unmarshal(b, &p); err != nil {
-		p = append(p, string(b))
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		p = append(p, s)
 	}
 	e.parts = p
 	return nil
@@ -79,7 +83,11 @@ func (e *Command) UnmarshalJSON(b []byte) error {
 
 	p := make([]string, 0, 1)
 	if err := json.Unmarshal(b, &p); err != nil {
-		p = append(p, string(b))
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		p = append(p, s)
 	}
 	e.parts = p
 	return nil

@@ -21,12 +21,13 @@ import (
 	"github.com/docker/docker/daemon/logger/jsonfilelog"
 	"github.com/docker/docker/daemon/network"
 	"github.com/docker/docker/image"
-	"github.com/docker/docker/nat"
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/broadcastwriter"
+	"github.com/docker/docker/pkg/fileutils"
 	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/docker/pkg/jsonlog"
 	"github.com/docker/docker/pkg/mount"
+	"github.com/docker/docker/pkg/nat"
 	"github.com/docker/docker/pkg/promise"
 	"github.com/docker/docker/pkg/symlink"
 	"github.com/docker/docker/runconfig"
@@ -201,8 +202,11 @@ func (container *Container) LogEvent(action string) {
 //       symlinking to a different path) between using this method and using the
 //       path. See symlink.FollowSymlinkInScope for more details.
 func (container *Container) GetResourcePath(path string) (string, error) {
-	cleanPath := filepath.Join("/", path)
-	return symlink.FollowSymlinkInScope(filepath.Join(container.basefs, cleanPath), container.basefs)
+	// IMPORTANT - These are paths on the OS where the daemon is running, hence
+	// any filepath operations must be done in an OS agnostic way.
+	cleanPath := filepath.Join(string(os.PathSeparator), path)
+	r, e := symlink.FollowSymlinkInScope(filepath.Join(container.basefs, cleanPath), container.basefs)
+	return r, e
 }
 
 // Evaluates `path` in the scope of the container's root, with proper path
@@ -218,7 +222,9 @@ func (container *Container) GetResourcePath(path string) (string, error) {
 //       symlinking to a different path) between using this method and using the
 //       path. See symlink.FollowSymlinkInScope for more details.
 func (container *Container) GetRootResourcePath(path string) (string, error) {
-	cleanPath := filepath.Join("/", path)
+	// IMPORTANT - These are paths on the OS where the daemon is running, hence
+	// any filepath operations must be done in an OS agnostic way.
+	cleanPath := filepath.Join(string(os.PathSeparator), path)
 	return symlink.FollowSymlinkInScope(filepath.Join(container.root, cleanPath), container.root)
 }
 
@@ -677,11 +683,20 @@ func (container *Container) Copy(resource string) (io.ReadCloser, error) {
 		return nil, err
 	}
 	for _, m := range mounts {
-		dest, err := container.GetResourcePath(m.Destination)
+		var dest string
+		dest, err = container.GetResourcePath(m.Destination)
 		if err != nil {
 			return nil, err
 		}
-		if err := mount.Mount(m.Source, dest, "bind", "rbind,ro"); err != nil {
+		var stat os.FileInfo
+		stat, err = os.Stat(m.Source)
+		if err != nil {
+			return nil, err
+		}
+		if err = fileutils.CreateIfNotExists(dest, stat.IsDir()); err != nil {
+			return nil, err
+		}
+		if err = mount.Mount(m.Source, dest, "bind", "rbind,ro"); err != nil {
 			return nil, err
 		}
 	}

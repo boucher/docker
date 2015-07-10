@@ -40,6 +40,8 @@ var validCommitCommands = map[string]bool{
 	"volume":     true,
 	"expose":     true,
 	"onbuild":    true,
+	"label":      true,
+	"maintainer": true,
 }
 
 type Config struct {
@@ -59,8 +61,7 @@ type Config struct {
 	CpuSetCpus     string
 	CpuSetMems     string
 	CgroupParent   string
-	AuthConfig     *cliconfig.AuthConfig
-	ConfigFile     *cliconfig.ConfigFile
+	AuthConfigs    map[string]cliconfig.AuthConfig
 
 	Stdout  io.Writer
 	Context io.ReadCloser
@@ -85,9 +86,8 @@ func (b *Config) WaitCancelled() <-chan struct{} {
 
 func NewBuildConfig() *Config {
 	return &Config{
-		AuthConfig: &cliconfig.AuthConfig{},
-		ConfigFile: &cliconfig.ConfigFile{},
-		cancelled:  make(chan struct{}),
+		AuthConfigs: map[string]cliconfig.AuthConfig{},
+		cancelled:   make(chan struct{}),
 	}
 }
 
@@ -190,8 +190,7 @@ func Build(d *daemon.Daemon, buildConfig *Config) error {
 		Pull:            buildConfig.Pull,
 		OutOld:          buildConfig.Stdout,
 		StreamFormatter: sf,
-		AuthConfig:      buildConfig.AuthConfig,
-		ConfigFile:      buildConfig.ConfigFile,
+		AuthConfigs:     buildConfig.AuthConfigs,
 		dockerfileName:  buildConfig.DockerfileName,
 		cpuShares:       buildConfig.CpuShares,
 		cpuPeriod:       buildConfig.CpuPeriod,
@@ -245,7 +244,17 @@ func BuildFromConfig(d *daemon.Daemon, c *runconfig.Config, changes []string) (*
 	return builder.Config, nil
 }
 
-func Commit(d *daemon.Daemon, name string, c *daemon.ContainerCommitConfig) (string, error) {
+type BuilderCommitConfig struct {
+	Pause   bool
+	Repo    string
+	Tag     string
+	Author  string
+	Comment string
+	Changes []string
+	Config  *runconfig.Config
+}
+
+func Commit(name string, d *daemon.Daemon, c *BuilderCommitConfig) (string, error) {
 	container, err := d.Get(name)
 	if err != nil {
 		return "", err
@@ -264,7 +273,16 @@ func Commit(d *daemon.Daemon, name string, c *daemon.ContainerCommitConfig) (str
 		return "", err
 	}
 
-	img, err := d.Commit(container, c.Repo, c.Tag, c.Comment, c.Author, c.Pause, newConfig)
+	commitCfg := &daemon.ContainerCommitConfig{
+		Pause:   c.Pause,
+		Repo:    c.Repo,
+		Tag:     c.Tag,
+		Author:  c.Author,
+		Comment: c.Comment,
+		Config:  newConfig,
+	}
+
+	img, err := d.Commit(container, commitCfg)
 	if err != nil {
 		return "", err
 	}

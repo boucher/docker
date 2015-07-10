@@ -312,7 +312,30 @@ func (m *containerMonitor) callback(processConfig *execdriver.ProcessConfig, pid
 	}
 
 	if err := m.container.ToDisk(); err != nil {
-		logrus.Debugf("%s", err)
+		logrus.Errorf("Error saving container to disk: %v", err)
+	}
+}
+
+// Like callback() but for restoring a container.
+func (m *containerMonitor) restoreCallback(processConfig *execdriver.ProcessConfig, restorePid int) {
+	// If restorePid is 0, it means that restore failed.
+	if restorePid != 0 {
+		m.container.setRunning(restorePid)
+	}
+
+	// Unblock the goroutine waiting in waitForRestore().
+	select {
+	case <-m.restoreSignal:
+	default:
+		close(m.restoreSignal)
+	}
+
+	if restorePid != 0 {
+		// Write config.json and hostconfig.json files
+		// to /var/lib/docker/containers/<ID>.
+		if err := m.container.ToDisk(); err != nil {
+			logrus.Debugf("%s", err)
+		}
 	}
 }
 
