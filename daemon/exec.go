@@ -11,6 +11,7 @@ import (
 	"github.com/docker/docker/daemon/execdriver"
 	"github.com/docker/docker/pkg/broadcastwriter"
 	"github.com/docker/docker/pkg/ioutils"
+	"github.com/docker/docker/pkg/pools"
 	"github.com/docker/docker/pkg/stringid"
 	"github.com/docker/docker/runconfig"
 )
@@ -109,7 +110,6 @@ func (d *Daemon) getActiveContainer(name string) (*Container, error) {
 }
 
 func (d *Daemon) ContainerExecCreate(config *runconfig.ExecConfig) (string, error) {
-
 	// Not all drivers support Exec (LXC for example)
 	if err := checkExecSupport(d.execDriver.Name()); err != nil {
 		return "", err
@@ -123,11 +123,16 @@ func (d *Daemon) ContainerExecCreate(config *runconfig.ExecConfig) (string, erro
 	cmd := runconfig.NewCommand(config.Cmd...)
 	entrypoint, args := d.getEntrypointAndArgs(runconfig.NewEntrypoint(), cmd)
 
+	user := config.User
+	if len(user) == 0 {
+		user = container.Config.User
+	}
+
 	processConfig := execdriver.ProcessConfig{
 		Tty:        config.Tty,
 		Entrypoint: entrypoint,
 		Arguments:  args,
-		User:       config.User,
+		User:       user,
 	}
 
 	execConfig := &execConfig{
@@ -183,7 +188,7 @@ func (d *Daemon) ContainerExecStart(execName string, stdin io.ReadCloser, stdout
 		go func() {
 			defer w.Close()
 			defer logrus.Debugf("Closing buffered stdin pipe")
-			io.Copy(w, stdin)
+			pools.Copy(w, stdin)
 		}()
 		cStdin = r
 	}

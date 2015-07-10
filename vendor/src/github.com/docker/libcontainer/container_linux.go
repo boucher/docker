@@ -386,7 +386,7 @@ func (c *linuxContainer) Checkpoint(criuOpts *CriuOpts) error {
 		return err
 	}
 
-	err = c.criuSwrk(nil, &req, criuOpts)
+	err = c.criuSwrk(nil, &req, criuOpts.LeaveRunning)
 	if err != nil {
 		return err
 	}
@@ -513,14 +513,14 @@ func (c *linuxContainer) Restore(process *Process, criuOpts *CriuOpts) error {
 		}
 	}
 
-	err = c.criuSwrk(process, &req, criuOpts)
+	err = c.criuSwrk(process, &req, false)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (c *linuxContainer) criuSwrk(process *Process, req *criurpc.CriuReq, opts *CriuOpts) error {
+func (c *linuxContainer) criuSwrk(process *Process, req *criurpc.CriuReq, leaveRunning bool) error {
 	fds, err := syscall.Socketpair(syscall.AF_LOCAL, syscall.SOCK_SEQPACKET|syscall.SOCK_CLOEXEC, 0)
 	if err != nil {
 		return err
@@ -595,7 +595,7 @@ func (c *linuxContainer) criuSwrk(process *Process, req *criurpc.CriuReq, opts *
 		t := resp.GetType()
 		switch {
 		case t == criurpc.CriuReqType_NOTIFY:
-			if err := c.criuNotifications(resp, process, opts, extFds); err != nil {
+			if err := c.criuNotifications(resp, process, leaveRunning, extFds); err != nil {
 				return err
 			}
 			t = criurpc.CriuReqType_NOTIFY
@@ -662,7 +662,7 @@ func unlockNetwork(config *configs.Config) error {
 	return nil
 }
 
-func (c *linuxContainer) criuNotifications(resp *criurpc.CriuResp, process *Process, opts *CriuOpts, fds []string) error {
+func (c *linuxContainer) criuNotifications(resp *criurpc.CriuResp, process *Process, leaveRunning bool, fds []string) error {
 	notify := resp.GetNotify()
 	if notify == nil {
 		return fmt.Errorf("invalid response: %s", resp.String())
@@ -670,7 +670,7 @@ func (c *linuxContainer) criuNotifications(resp *criurpc.CriuResp, process *Proc
 
 	switch {
 	case notify.GetScript() == "post-dump":
-		if !opts.LeaveRunning {
+		if !leaveRunning {
 			f, err := os.Create(filepath.Join(c.root, "checkpoint"))
 			if err != nil {
 				return err

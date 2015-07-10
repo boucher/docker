@@ -21,12 +21,13 @@ import (
 	"github.com/docker/docker/daemon/logger/jsonfilelog"
 	"github.com/docker/docker/daemon/network"
 	"github.com/docker/docker/image"
-	"github.com/docker/docker/nat"
 	"github.com/docker/docker/pkg/archive"
 	"github.com/docker/docker/pkg/broadcastwriter"
+	"github.com/docker/docker/pkg/fileutils"
 	"github.com/docker/docker/pkg/ioutils"
 	"github.com/docker/docker/pkg/jsonlog"
 	"github.com/docker/docker/pkg/mount"
+	"github.com/docker/docker/pkg/nat"
 	"github.com/docker/docker/pkg/promise"
 	"github.com/docker/docker/pkg/symlink"
 	"github.com/docker/docker/runconfig"
@@ -201,8 +202,11 @@ func (container *Container) LogEvent(action string) {
 //       symlinking to a different path) between using this method and using the
 //       path. See symlink.FollowSymlinkInScope for more details.
 func (container *Container) GetResourcePath(path string) (string, error) {
-	cleanPath := filepath.Join("/", path)
-	return symlink.FollowSymlinkInScope(filepath.Join(container.basefs, cleanPath), container.basefs)
+	// IMPORTANT - These are paths on the OS where the daemon is running, hence
+	// any filepath operations must be done in an OS agnostic way.
+	cleanPath := filepath.Join(string(os.PathSeparator), path)
+	r, e := symlink.FollowSymlinkInScope(filepath.Join(container.basefs, cleanPath), container.basefs)
+	return r, e
 }
 
 // Evaluates `path` in the scope of the container's root, with proper path
@@ -218,7 +222,9 @@ func (container *Container) GetResourcePath(path string) (string, error) {
 //       symlinking to a different path) between using this method and using the
 //       path. See symlink.FollowSymlinkInScope for more details.
 func (container *Container) GetRootResourcePath(path string) (string, error) {
-	cleanPath := filepath.Join("/", path)
+	// IMPORTANT - These are paths on the OS where the daemon is running, hence
+	// any filepath operations must be done in an OS agnostic way.
+	cleanPath := filepath.Join(string(os.PathSeparator), path)
 	return symlink.FollowSymlinkInScope(filepath.Join(container.root, cleanPath), container.root)
 }
 
@@ -601,62 +607,6 @@ func validateID(id string) error {
 	return nil
 }
 
-func (container *Container) Checkpoint(opts *runconfig.CriuConfig) error {
-	if err := container.daemon.Checkpoint(container, opts); err != nil {
-		return err
-	}
-
-	if opts.LeaveRunning == false {
-		container.ReleaseNetwork(true)
-	}
-	return nil
-}
-
-func (container *Container) Restore(opts *runconfig.CriuConfig, forceRestore bool) error {
-	var err error
-	container.Lock()
-	defer container.Unlock()
-
-	defer func() {
-		if err != nil {
-			container.setError(err)
-			// if no one else has set it, make sure we don't leave it at zero
-			if container.ExitCode == 0 {
-				container.ExitCode = 128
-			}
-			container.toDisk()
-			container.cleanup()
-		}
-	}()
-
-	if err := container.Mount(); err != nil {
-		return err
-	}
-	if err = container.initializeNetworking(true); err != nil {
-		return err
-	}
-	linkedEnv, err := container.setupLinkedContainers()
-	if err != nil {
-		return err
-	}
-	if err = container.setupWorkingDirectory(); err != nil {
-		return err
-	}
-
-	env := container.createDaemonEnvironment(linkedEnv)
-	if err = populateCommand(container, env); err != nil {
-		return err
-	}
-
-	mounts, err := container.setupMounts()
-	if err != nil {
-		return err
-	}
-
-	container.command.Mounts = mounts
-	return container.waitForRestore(opts, forceRestore)
-}
-
 func (container *Container) Copy(resource string) (io.ReadCloser, error) {
 	container.Lock()
 	defer container.Unlock()
@@ -677,11 +627,20 @@ func (container *Container) Copy(resource string) (io.ReadCloser, error) {
 		return nil, err
 	}
 	for _, m := range mounts {
-		dest, err := container.GetResourcePath(m.Destination)
+		var dest string
+		dest, err = container.GetResourcePath(m.Destination)
 		if err != nil {
 			return nil, err
 		}
-		if err := mount.Mount(m.Source, dest, "bind", "rbind,ro"); err != nil {
+		var stat os.FileInfo
+		stat, err = os.Stat(m.Source)
+		if err != nil {
+			return nil, err
+		}
+		if err = fileutils.CreateIfNotExists(dest, stat.IsDir()); err != nil {
+			return nil, err
+		}
+		if err = mount.Mount(m.Source, dest, "bind", "rbind,ro"); err != nil {
 			return nil, err
 		}
 	}
@@ -804,26 +763,6 @@ func (container *Container) waitForStart() error {
 	select {
 	case <-container.monitor.startSignal:
 	case err := <-promise.Go(container.monitor.Start):
-		return err
-	}
-
-	return nil
-}
-
-func (container *Container) waitForRestore(opts *runconfig.CriuConfig, forceRestore bool) error {
-	container.monitor = newContainerMonitor(container, container.hostConfig.RestartPolicy)
-
-	// After calling promise.Go() we'll have two goroutines:
-	// - The current goroutine that will block in the select
-	//   below until restore is done.
-	// - A new goroutine that will restore the container and
-	//   wait for it to exit.
-	select {
-	case <-container.monitor.restoreSignal:
-		if container.ExitCode != 0 {
-			return fmt.Errorf("restore process failed")
-		}
-	case err := <-promise.Go(func() error { return container.monitor.Restore(opts, forceRestore) }):
 		return err
 	}
 

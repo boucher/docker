@@ -9,7 +9,7 @@ issues associated with it. If necessary, links are provided to additional
 documentation on an issue.  As an active Docker user and community member,
 please feel free to provide any feedback on these features you wish.
 
-## Install Docker experimental 
+## Install Docker experimental
 
 Unlike the regular Docker binary, the experimental channels is built and updated nightly on TO.BE.ANNOUNCED. From one day to the next, new features may appear, while existing experimental features may be refined or entirely removed.
 
@@ -42,10 +42,28 @@ Unlike the regular Docker binary, the experimental channels is built and updated
 
     This command downloads a test image and runs it in a container.
 
+### Get the Linux binary
+To download the latest experimental `docker` binary for Linux,
+use the following URLs:
+
+    https://experimental.docker.com/builds/Linux/i386/docker-latest
+
+    https://experimental.docker.com/builds/Linux/x86_64/docker-latest
+
+After downloading the appropriate binary, you can follow the instructions
+[here](https://docs.docker.com/installation/binaries/#get-the-docker-binary) to run the `docker` daemon.
+
+> **Note**
+>
+> 1) You can get the MD5 and SHA256 hashes by appending .md5 and .sha256 to the URLs respectively
+>
+> 2) You can get the compressed binaries by appending .tgz to the URLs
+
 ## Current experimental features
 
 * [Support for Docker plugins](plugins.md)
-  * [Volume plugins](plugins_volume.md)
+* [Volume plugins](plugins_volume.md)
+* [Network plugins](plugins_network.md)
 * [Native Multi-host networking](networking.md)
 * [Compose, Swarm and networking integration](compose_swarm_networking.md)
 

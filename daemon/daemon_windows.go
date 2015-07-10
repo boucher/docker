@@ -8,6 +8,7 @@ import (
 
 	"github.com/docker/docker/daemon/graphdriver"
 	"github.com/docker/docker/pkg/archive"
+	"github.com/docker/docker/pkg/parsers"
 	"github.com/docker/docker/runconfig"
 	"github.com/docker/libnetwork"
 )
@@ -95,11 +96,43 @@ func configureSysInit(config *Config) (string, error) {
 	return os.Getenv("TEMP"), nil
 }
 
-func isNetworkDisabled(config *Config) bool {
+func isBridgeNetworkDisabled(config *Config) bool {
 	return false
 }
 
 func initNetworkController(config *Config) (libnetwork.NetworkController, error) {
 	// TODO Windows
 	return nil, nil
+}
+
+func (daemon *Daemon) RegisterLinks(container *Container, hostConfig *runconfig.HostConfig) error {
+	// TODO Windows. Factored out for network modes. There may be more
+	// refactoring required here.
+
+	if hostConfig == nil || hostConfig.Links == nil {
+		return nil
+	}
+
+	for _, l := range hostConfig.Links {
+		name, alias, err := parsers.ParseLink(l)
+		if err != nil {
+			return err
+		}
+		child, err := daemon.Get(name)
+		if err != nil {
+			//An error from daemon.Get() means this name could not be found
+			return fmt.Errorf("Could not get container for %s", name)
+		}
+		if err := daemon.RegisterLink(container, child, alias); err != nil {
+			return err
+		}
+	}
+
+	// After we load all the links into the daemon
+	// set them to nil on the hostconfig
+	hostConfig.Links = nil
+	if err := container.WriteHostConfig(); err != nil {
+		return err
+	}
+	return nil
 }

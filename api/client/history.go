@@ -22,12 +22,15 @@ func (cli *DockerCli) CmdHistory(args ...string) error {
 	quiet := cmd.Bool([]string{"q", "-quiet"}, false, "Only show numeric IDs")
 	noTrunc := cmd.Bool([]string{"#notrunc", "-no-trunc"}, false, "Don't truncate output")
 	cmd.Require(flag.Exact, 1)
+
 	cmd.ParseFlags(args, true)
 
 	rdr, _, _, err := cli.call("GET", "/images/"+cmd.Arg(0)+"/history", nil, nil)
 	if err != nil {
 		return err
 	}
+
+	defer rdr.Close()
 
 	history := []types.ImageHistory{}
 	if err := json.NewDecoder(rdr).Decode(&history); err != nil {

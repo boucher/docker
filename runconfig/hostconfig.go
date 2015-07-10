@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/docker/docker/nat"
+	"github.com/docker/docker/pkg/nat"
 	"github.com/docker/docker/pkg/ulimit"
 )
 
@@ -15,51 +15,6 @@ type KeyValuePair struct {
 }
 
 type NetworkMode string
-
-// IsPrivate indicates whether container use it's private network stack
-func (n NetworkMode) IsPrivate() bool {
-	return !(n.IsHost() || n.IsContainer())
-}
-
-func (n NetworkMode) IsDefault() bool {
-	return n == "default"
-}
-
-func DefaultDaemonNetworkMode() NetworkMode {
-	return NetworkMode("bridge")
-}
-
-func (n NetworkMode) NetworkName() string {
-	if n.IsBridge() {
-		return "bridge"
-	} else if n.IsHost() {
-		return "host"
-	} else if n.IsContainer() {
-		return "container"
-	} else if n.IsNone() {
-		return "none"
-	} else if n.IsDefault() {
-		return "default"
-	}
-	return ""
-}
-
-func (n NetworkMode) IsBridge() bool {
-	return n == "bridge"
-}
-
-func (n NetworkMode) IsHost() bool {
-	return n == "host"
-}
-
-func (n NetworkMode) IsContainer() bool {
-	parts := strings.SplitN(string(n), ":", 2)
-	return len(parts) > 1 && parts[0] == "container"
-}
-
-func (n NetworkMode) IsNone() bool {
-	return n == "none"
-}
 
 type IpcMode string
 
@@ -218,6 +173,53 @@ func NewLxcConfig(values []KeyValuePair) *LxcConfig {
 	return &LxcConfig{values}
 }
 
+type CapList struct {
+	caps []string
+}
+
+func (c *CapList) MarshalJSON() ([]byte, error) {
+	if c == nil {
+		return []byte{}, nil
+	}
+	return json.Marshal(c.Slice())
+}
+
+func (c *CapList) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 {
+		return nil
+	}
+
+	var caps []string
+	if err := json.Unmarshal(b, &caps); err != nil {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		caps = append(caps, s)
+	}
+	c.caps = caps
+
+	return nil
+}
+
+func (c *CapList) Len() int {
+	if c == nil {
+		return 0
+	}
+	return len(c.caps)
+}
+
+func (c *CapList) Slice() []string {
+	if c == nil {
+		return nil
+	}
+	return c.caps
+}
+
+func NewCapList(caps []string) *CapList {
+	return &CapList{caps}
+}
+
 type HostConfig struct {
 	Binds           []string
 	ContainerIDFile string
@@ -244,8 +246,8 @@ type HostConfig struct {
 	IpcMode         IpcMode
 	PidMode         PidMode
 	UTSMode         UTSMode
-	CapAdd          []string
-	CapDrop         []string
+	CapAdd          *CapList
+	CapDrop         *CapList
 	RestartPolicy   RestartPolicy
 	SecurityOpt     []string
 	ReadonlyRootfs  bool

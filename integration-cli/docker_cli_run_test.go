@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/docker/nat"
+	"github.com/docker/docker/pkg/nat"
 	"github.com/docker/libnetwork/resolvconf"
 	"github.com/go-check/check"
 )
@@ -1480,10 +1480,10 @@ func (s *DockerSuite) TestRunResolvconfUpdate(c *check.C) {
 		c.Fatalf("Restarted container does not have updated resolv.conf; expected %q, got %q", tmpResolvConf, string(containerResolv))
 	}
 
-	/* 	//make a change to resolv.conf (in this case replacing our tmp copy with orig copy)
-	   	if err := ioutil.WriteFile("/etc/resolv.conf", resolvConfSystem, 0644); err != nil {
-	   		c.Fatal(err)
-	   	} */
+	/*	//make a change to resolv.conf (in this case replacing our tmp copy with orig copy)
+		if err := ioutil.WriteFile("/etc/resolv.conf", resolvConfSystem, 0644); err != nil {
+			c.Fatal(err)
+		} */
 	//2. test that a restarting container does not receive resolv.conf updates
 	//   if it modified the container copy of the starting point resolv.conf
 	cmd = exec.Command(dockerBinary, "run", "--name='second'", "busybox", "sh", "-c", "echo 'search mylittlepony.com' >>/etc/resolv.conf")
@@ -1793,7 +1793,7 @@ func (s *DockerSuite) TestRunCleanupCmdOnEntrypoint(c *check.C) {
 	if _, err := buildImage(name,
 		`FROM busybox
 		ENTRYPOINT ["echo"]
-        CMD ["testingpoint"]`,
+	CMD ["testingpoint"]`,
 		true); err != nil {
 		c.Fatal(err)
 	}
@@ -2820,6 +2820,22 @@ func (s *DockerSuite) TestRunNetHost(c *check.C) {
 	}
 }
 
+func (s *DockerSuite) TestRunNetHostTwiceSameName(c *check.C) {
+	testRequires(c, SameHostDaemon)
+
+	cmd := exec.Command(dockerBinary, "run", "--rm", "--name=thost", "--net=host", "busybox", "true")
+	out2, _, err := runCommandWithOutput(cmd)
+	if err != nil {
+		c.Fatal(err, out2)
+	}
+
+	cmd = exec.Command(dockerBinary, "run", "--rm", "--name=thost", "--net=host", "busybox", "true")
+	out2, _, err = runCommandWithOutput(cmd)
+	if err != nil {
+		c.Fatal(err, out2)
+	}
+}
+
 func (s *DockerSuite) TestRunNetContainerWhichHost(c *check.C) {
 	testRequires(c, SameHostDaemon)
 
@@ -2867,6 +2883,7 @@ func (s *DockerSuite) TestRunAllowPortRangeThroughPublish(c *check.C) {
 }
 
 func (s *DockerSuite) TestRunOOMExitCode(c *check.C) {
+	testRequires(c, OomControl)
 	errChan := make(chan error)
 	go func() {
 		defer close(errChan)
@@ -3203,4 +3220,16 @@ func (s *DockerSuite) TestRunContainerNetModeWithExposePort(c *check.C) {
 		c.Fatalf("run --net=container with --expose should error out")
 	}
 
+}
+
+func (s *DockerSuite) TestRunCapAddCHOWN(c *check.C) {
+	cmd := exec.Command(dockerBinary, "run", "--cap-drop=ALL", "--cap-add=CHOWN", "busybox", "sh", "-c", "adduser -D -H newuser && chown newuser /home && echo ok")
+	out, _, err := runCommandWithOutput(cmd)
+	if err != nil {
+		c.Fatal(err, out)
+	}
+
+	if actual := strings.Trim(out, "\r\n"); actual != "ok" {
+		c.Fatalf("expected output ok received %s", actual)
+	}
 }

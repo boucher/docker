@@ -16,12 +16,15 @@ import (
 func (cli *DockerCli) CmdInfo(args ...string) error {
 	cmd := cli.Subcmd("info", nil, "Display system-wide information", true)
 	cmd.Require(flag.Exact, 0)
+
 	cmd.ParseFlags(args, true)
 
 	rdr, _, _, err := cli.call("GET", "/info", nil, nil)
 	if err != nil {
 		return err
 	}
+
+	defer rdr.Close()
 
 	info := &types.Info{}
 	if err := json.NewDecoder(rdr).Decode(info); err != nil {
