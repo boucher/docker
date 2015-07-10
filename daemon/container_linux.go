@@ -856,22 +856,37 @@ func (container *Container) configureNetwork(networkName, service, networkDriver
 		}
 	}
 
-	ep, err := n.EndpointByName(service)
-	if err != nil {
-		if _, ok := err.(libnetwork.ErrNoSuchEndpoint); !ok {
-			return err
-		}
+	var ep libnetwork.Endpoint
 
-		createOptions, err := container.buildCreateEndpointOptions(isRestoring)
-		if err != nil {
-			return err
+	if isRestoring == true {
+		// Use existing Endpoint for a checkpointed container
+		for _, endpoint := range n.Endpoints() {
+			if endpoint.ID() == container.NetworkSettings.EndpointID {
+				ep = endpoint
+			}
 		}
-
-		ep, err = n.CreateEndpoint(service, createOptions...)
+		if ep == nil {
+			return fmt.Errorf("Fail to find the Endpoint for the checkpointed container")
+		}
+	} else {
+		ep, err = n.EndpointByName(service)
 		if err != nil {
-			return err
+			if _, ok := err.(libnetwork.ErrNoSuchEndpoint); !ok {
+				return err
+			}
+
+			createOptions, err := container.buildCreateEndpointOptions(isRestoring)
+			if err != nil {
+				return err
+			}
+
+			ep, err = n.CreateEndpoint(service, createOptions...)
+			if err != nil {
+				return err
+			}
 		}
 	}
+
 
 	if err := container.updateNetworkSettings(n, ep); err != nil {
 		return err
@@ -1012,7 +1027,7 @@ func (container *Container) getNetworkedContainer() (*Container, error) {
 	}
 }
 
-func (container *Container) ReleaseNetwork() {
+func (container *Container) ReleaseNetwork(is_checkpoint bool) {
 	if container.hostConfig.NetworkMode.IsContainer() || container.Config.NetworkDisabled {
 		return
 	}
@@ -1020,7 +1035,6 @@ func (container *Container) ReleaseNetwork() {
 	eid := container.NetworkSettings.EndpointID
 	nid := container.NetworkSettings.NetworkID
 
-	container.NetworkSettings = &network.Settings{}
 
 	if nid == "" || eid == "" {
 		return
@@ -1050,6 +1064,13 @@ func (container *Container) ReleaseNetwork() {
 			return
 		}
 	}
+
+	if is_checkpoint == true {
+		return
+	}
+
+	container.NetworkSettings = &network.Settings{}
+
 
 	// In addition to leaving all endpoints, delete implicitly created endpoint
 	if container.Config.PublishService == "" {

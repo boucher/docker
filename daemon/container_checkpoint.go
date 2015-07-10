@@ -13,7 +13,7 @@ func (container *Container) Checkpoint(opts *runconfig.CriuConfig) error {
 	}
 
 	if opts.LeaveRunning == false {
-		container.ReleaseNetwork()
+		container.ReleaseNetwork(true)
 	}
 	return nil
 }
