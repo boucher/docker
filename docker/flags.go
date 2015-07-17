@@ -31,7 +31,6 @@ var (
 	dockerCommands = []command{
 		{"attach", "Attach to a running container"},
 		{"build", "Build an image from a Dockerfile"},
-		{"checkpoint", "Checkpoint one or more running containers"},
 		{"commit", "Create a new image from a container's changes"},
 		{"cp", "Copy files/folders from a container to a HOSTDIR or to STDOUT"},
 		{"create", "Create a new container"},
@@ -56,7 +55,6 @@ var (
 		{"push", "Push an image or a repository to a registry"},
 		{"rename", "Rename a container"},
 		{"restart", "Restart a running container"},
-		{"restore", "Restore one or more checkpointed containers"},
 		{"rm", "Remove one or more containers"},
 		{"rmi", "Remove one or more images"},
 		{"run", "Run a command in a new container"},
@@ -131,9 +129,10 @@ func init() {
 
 		help := "\nCommands:\n"
 
-		sort.Sort(byName(dockerCommands))
+		allCommands := append(dockerCommands, experimentalCommands...)
+		sort.Sort(byName(allCommands))
 
-		for _, cmd := range dockerCommands {
+		for _, cmd := range allCommands {
 			help += fmt.Sprintf("    %-11.11s%s\n", cmd.name, cmd.description)
 		}
 

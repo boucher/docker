@@ -1348,48 +1348,6 @@ func (s *Server) postContainersCopy(version version.Version, w http.ResponseWrit
 	return nil
 }
 
-func (s *Server) postContainersCheckpoint(version version.Version, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-	if vars == nil {
-		return fmt.Errorf("Missing parameter")
-	}
-	if err := parseForm(r); err != nil {
-		return err
-	}
-
-	criuOpts := &runconfig.CriuConfig{}
-	if err := json.NewDecoder(r.Body).Decode(criuOpts); err != nil {
-		return err
-	}
-
-	if err := s.daemon.ContainerCheckpoint(vars["name"], criuOpts); err != nil {
-		return err
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-	return nil
-}
-
-func (s *Server) postContainersRestore(version version.Version, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-	if vars == nil {
-		return fmt.Errorf("Missing parameter")
-	}
-	if err := parseForm(r); err != nil {
-		return err
-	}
-
-	restoreOpts := runconfig.RestoreConfig{}
-	if err := json.NewDecoder(r.Body).Decode(&restoreOpts); err != nil {
-		return err
-	}
-
-	if err := s.daemon.ContainerRestore(vars["name"], &restoreOpts.CriuOpts, restoreOpts.ForceRestore); err != nil {
-		return err
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-	return nil
-}
-
 func (s *Server) postContainerExecCreate(version version.Version, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
 	if err := parseForm(r); err != nil {
 		return err
@@ -1601,30 +1559,28 @@ func createRouter(s *Server) *mux.Router {
 			"/exec/{id:.*}/json":              s.getExecByID,
 		},
 		"POST": {
-			"/auth":                            s.postAuth,
-			"/commit":                          s.postCommit,
-			"/build":                           s.postBuild,
-			"/images/create":                   s.postImagesCreate,
-			"/images/load":                     s.postImagesLoad,
-			"/images/{name:.*}/push":           s.postImagesPush,
-			"/images/{name:.*}/tag":            s.postImagesTag,
-			"/containers/create":               s.postContainersCreate,
-			"/containers/{name:.*}/kill":       s.postContainersKill,
-			"/containers/{name:.*}/pause":      s.postContainersPause,
-			"/containers/{name:.*}/unpause":    s.postContainersUnpause,
-			"/containers/{name:.*}/restart":    s.postContainersRestart,
-			"/containers/{name:.*}/start":      s.postContainersStart,
-			"/containers/{name:.*}/stop":       s.postContainersStop,
-			"/containers/{name:.*}/wait":       s.postContainersWait,
-			"/containers/{name:.*}/resize":     s.postContainersResize,
-			"/containers/{name:.*}/attach":     s.postContainersAttach,
-			"/containers/{name:.*}/copy":       s.postContainersCopy,
-			"/containers/{name:.*}/exec":       s.postContainerExecCreate,
-			"/exec/{name:.*}/start":            s.postContainerExecStart,
-			"/exec/{name:.*}/resize":           s.postContainerExecResize,
-			"/containers/{name:.*}/rename":     s.postContainerRename,
-			"/containers/{name:.*}/checkpoint": s.postContainersCheckpoint,
-			"/containers/{name:.*}/restore":    s.postContainersRestore,
+			"/auth":                         s.postAuth,
+			"/commit":                       s.postCommit,
+			"/build":                        s.postBuild,
+			"/images/create":                s.postImagesCreate,
+			"/images/load":                  s.postImagesLoad,
+			"/images/{name:.*}/push":        s.postImagesPush,
+			"/images/{name:.*}/tag":         s.postImagesTag,
+			"/containers/create":            s.postContainersCreate,
+			"/containers/{name:.*}/kill":    s.postContainersKill,
+			"/containers/{name:.*}/pause":   s.postContainersPause,
+			"/containers/{name:.*}/unpause": s.postContainersUnpause,
+			"/containers/{name:.*}/restart": s.postContainersRestart,
+			"/containers/{name:.*}/start":   s.postContainersStart,
+			"/containers/{name:.*}/stop":    s.postContainersStop,
+			"/containers/{name:.*}/wait":    s.postContainersWait,
+			"/containers/{name:.*}/resize":  s.postContainersResize,
+			"/containers/{name:.*}/attach":  s.postContainersAttach,
+			"/containers/{name:.*}/copy":    s.postContainersCopy,
+			"/containers/{name:.*}/exec":    s.postContainerExecCreate,
+			"/exec/{name:.*}/start":         s.postContainerExecStart,
+			"/exec/{name:.*}/resize":        s.postContainerExecResize,
+			"/containers/{name:.*}/rename":  s.postContainerRename,
 		},
 		"DELETE": {
 			"/containers/{name:.*}": s.deleteContainers,
@@ -1634,6 +1590,8 @@ func createRouter(s *Server) *mux.Router {
 			"": s.optionsHandler,
 		},
 	}
+
+	addExperimentalRoutes(s, &m)
 
 	// If "api-cors-header" is not given, but "api-enable-cors" is true, we set cors to "*"
 	// otherwise, all head values will be passed to HTTP handler
