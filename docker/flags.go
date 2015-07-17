@@ -23,7 +23,6 @@ func (a byName) Less(i, j int) bool { return a[i].name < a[j].name }
 var dockerCommands = []command{
 	{"attach", "Attach to a running container"},
 	{"build", "Build an image from a Dockerfile"},
-	{"checkpoint", "Checkpoint one or more running containers"},
 	{"commit", "Create a new image from a container's changes"},
 	{"cp", "Copy files/folders from a container to a HOSTDIR or to STDOUT"},
 	{"create", "Create a new container"},
@@ -48,7 +47,6 @@ var dockerCommands = []command{
 	{"push", "Push an image or a repository to a registry"},
 	{"rename", "Rename a container"},
 	{"restart", "Restart a running container"},
-	{"restore", "Restore one or more checkpointed containers"},
 	{"rm", "Remove one or more containers"},
 	{"rmi", "Remove one or more images"},
 	{"run", "Run a command in a new container"},

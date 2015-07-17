@@ -217,7 +217,7 @@ type ContainerState struct {
 	Error      	   string
 	StartedAt  	   string
 	FinishedAt 	   string
-	CheckpointedAt string
+	CheckpointedAt string `json:"-"`
 }
 
 // GET "/containers/{name:.*}/json"
