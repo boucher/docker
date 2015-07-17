@@ -2,9 +2,17 @@
 
 package server
 
-func addExperimentalRoutes(s *Server, m *map[string]map[string]HttpApiFunc) {
-	m["GET"]["/containers/{name:.*}/checkpoint"] = s.postContainersCheckpoint
-	m["GET"]["/containers/{name:.*}/restore"] = s.postContainersRestore
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"github.com/docker/docker/pkg/version"
+	"github.com/docker/docker/runconfig"
+	)
+
+func addExperimentalRoutes(s *Server, m map[string]map[string]HttpApiFunc) {
+	m["POST"]["/containers/{name:.*}/checkpoint"] = s.postContainersCheckpoint
+	m["POST"]["/containers/{name:.*}/restore"] = s.postContainersRestore
 }
 
 func (s *Server) registerSubRouter() {
