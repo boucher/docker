@@ -366,7 +366,7 @@ func createRouter(s *Server) *mux.Router {
 		},
 	}
 
-	addExperimentalRoutes(s, &m)
+	addExperimentalRoutes(s, m)
 
 	// If "api-cors-header" is not given, but "api-enable-cors" is true, we set cors to "*"
 	// otherwise, all head values will be passed to HTTP handler
