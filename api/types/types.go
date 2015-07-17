@@ -196,7 +196,7 @@ type ExecStartCheck struct {
 type ContainerState struct {
 	Running        bool
 	Paused         bool
-	Checkpointed   bool
+	Checkpointed   bool `json:"-"`
 	Restarting     bool
 	OOMKilled      bool
 	Dead           bool
@@ -205,7 +205,7 @@ type ContainerState struct {
 	Error          string
 	StartedAt      time.Time
 	FinishedAt     time.Time
-	CheckpointedAt time.Time
+	CheckpointedAt time.Time `json:"-"`
 }
 
 // GET "/containers/{name:.*}/json"

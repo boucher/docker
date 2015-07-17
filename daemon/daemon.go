@@ -280,13 +280,13 @@ func (daemon *Daemon) restore() error {
 			// the IP address that it was using.
 			//
 			// XXX We should also reserve host ports (if any).
-			if container.IsCheckpointed() {
-				/*err = bridge.ReserveIP(container.ID, container.NetworkSettings.IPAddress)
+			/*if container.IsCheckpointed() {
+				err = bridge.ReserveIP(container.ID, container.NetworkSettings.IPAddress)
 				if err != nil {
 					log.Errorf("Failed to reserve IP %s for container %s",
 						container.ID, container.NetworkSettings.IPAddress)
-				}*/
-			}
+				}
+			}*/
 		} else {
 			logrus.Debugf("Cannot load container %s because it was created with another graph driver.", container.ID)
 		}
