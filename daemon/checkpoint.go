@@ -19,6 +19,10 @@ func (daemon *Daemon) ContainerCheckpoint(name string, opts *runconfig.CriuConfi
 		return fmt.Errorf("Cannot checkpoint container %s: %s", name, err)
 	}
 
+	if err := container.ToDisk(); err != nil {
+		return fmt.Errorf("Cannot update config for container %s: %s", name, err)
+	}
+
 	container.LogEvent("checkpoint")
 	return nil
 }
