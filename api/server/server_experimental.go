@@ -5,12 +5,12 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"github.com/docker/docker/pkg/version"
 	"github.com/docker/docker/runconfig"
-	)
+	"net/http"
+)
 
-func addExperimentalRoutes(s *Server, m map[string]map[string]HttpApiFunc) {
+func addExperimentalRoutes(s *Server, m map[string]map[string]HTTPAPIFunc) {
 	m["POST"]["/containers/{name:.*}/checkpoint"] = s.postContainersCheckpoint
 	m["POST"]["/containers/{name:.*}/restore"] = s.postContainersRestore
 }

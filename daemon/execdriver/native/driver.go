@@ -313,7 +313,7 @@ func libcontainerCriuOpts(runconfigOpts *runconfig.CriuConfig) *libcontainer.Cri
 	}
 }
 
-func (d *driver) Checkpoint(c *execdriver.Command, opts *runconfig.CriuConfig) error {
+func (d *Driver) Checkpoint(c *execdriver.Command, opts *runconfig.CriuConfig) error {
 	active := d.activeContainers[c.ID]
 	if active == nil {
 		return fmt.Errorf("active container for %s does not exist", c.ID)
@@ -329,7 +329,7 @@ func (d *driver) Checkpoint(c *execdriver.Command, opts *runconfig.CriuConfig) e
 	return nil
 }
 
-func (d *driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback, opts *runconfig.CriuConfig, forceRestore bool) (execdriver.ExitStatus, error) {
+func (d *Driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback, opts *runconfig.CriuConfig, forceRestore bool) (execdriver.ExitStatus, error) {
 	var (
 		cont libcontainer.Container
 		err  error

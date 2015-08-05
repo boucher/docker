@@ -207,16 +207,16 @@ type ExecStartCheck struct {
 
 type ContainerState struct {
 	Running        bool
-	Paused    	   bool
+	Paused         bool
 	Checkpointed   bool
-	Restarting 	   bool
-	OOMKilled  	   bool
-	Dead       	   bool
-	Pid        	   int
-	ExitCode   	   int
-	Error      	   string
-	StartedAt  	   string
-	FinishedAt 	   string
+	Restarting     bool
+	OOMKilled      bool
+	Dead           bool
+	Pid            int
+	ExitCode       int
+	Error          string
+	StartedAt      string
+	FinishedAt     string
 	CheckpointedAt string `json:"-"`
 }
 

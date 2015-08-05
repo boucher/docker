@@ -5,12 +5,13 @@ package client
 import (
 	"fmt"
 
+	Cli "github.com/docker/docker/cli"
 	flag "github.com/docker/docker/pkg/mflag"
 	"github.com/docker/docker/runconfig"
 )
 
 func (cli *DockerCli) CmdCheckpoint(args ...string) error {
-	cmd := cli.Subcmd("checkpoint", []string{"CONTAINER [CONTAINER...]"}, "Checkpoint one or more running containers", true)
+	cmd := Cli.Subcmd("checkpoint", []string{"CONTAINER [CONTAINER...]"}, "Checkpoint one or more running containers", true)
 	cmd.Require(flag.Min, 1)
 
 	var (
