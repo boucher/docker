@@ -266,6 +266,7 @@ func waitInPIDHost(p *libcontainer.Process, c libcontainer.Container) func() (*o
 // Kill implements the exec driver Driver interface.
 func (d *Driver) Kill(c *execdriver.Command, sig int) error {
 	d.Lock()
+	_, err := d.factory.Load(c.ID)
 	active := d.activeContainers[c.ID]
 	d.Unlock()
 	if active == nil {
@@ -303,7 +304,7 @@ func (d *Driver) Unpause(c *execdriver.Command) error {
 }
 
 func libcontainerCriuOpts(runconfigOpts *runconfig.CriuConfig) *libcontainer.CriuOpts {
-	return &libcontainer.CriuOpts{
+	criuopts := &libcontainer.CriuOpts{
 		ImagesDirectory:         runconfigOpts.ImagesDirectory,
 		WorkDirectory:           runconfigOpts.WorkDirectory,
 		LeaveRunning:            runconfigOpts.LeaveRunning,
@@ -311,6 +312,15 @@ func libcontainerCriuOpts(runconfigOpts *runconfig.CriuConfig) *libcontainer.Cri
 		ExternalUnixConnections: runconfigOpts.ExternalUnixConnections,
 		ShellJob:                runconfigOpts.ShellJob,
 	}
+
+	for _, i := range runconfigOpts.VethPairs {
+		criuopts.VethPairs = append(criuopts.VethPairs,
+			libcontainer.VethPairName{
+				InName:  i.InName,
+				OutName: i.OutName,
+			})
+	}
+	return criuopts
 }
 
 func (d *Driver) Checkpoint(c *execdriver.Command, opts *runconfig.CriuConfig) error {

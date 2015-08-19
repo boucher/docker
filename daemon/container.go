@@ -343,12 +343,11 @@ func (container *Container) isNetworkAllocated() bool {
 // cleanup releases any network resources allocated to the container along with any rules
 // around how containers are linked together.  It also unmounts the container's root filesystem.
 func (container *Container) cleanup() {
-	/*if container.IsCheckpointed() {
+	if container.IsCheckpointed() {
 		logrus.Debugf("not calling ReleaseNetwork() for checkpointed container %s", container.ID)
 	} else {
-		container.ReleaseNetwork()
-	}*/
-	container.ReleaseNetwork()
+		container.ReleaseNetwork(false)
+	}
 
 	if err := container.CleanupStorage(); err != nil {
 		logrus.Errorf("%v: Failed to cleanup storage: %v", container.ID, err)
