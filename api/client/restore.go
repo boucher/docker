@@ -21,6 +21,7 @@ func (cli *DockerCli) CmdRestore(args ...string) error {
 		flExtUnix  = cmd.Bool([]string{"-allow-ext-unix"}, false, "allow restoring external unix connections")
 		flShell    = cmd.Bool([]string{"-allow-shell"}, false, "allow restoring shell jobs")
 		flForce    = cmd.Bool([]string{"-force"}, false, "bypass checks for current container state")
+		flFileLocks    = cmd.Bool([]string{"-file-locks"}, false, "allow handling file locks")
 	)
 
 	if err := cmd.ParseFlags(args, true); err != nil {
@@ -39,6 +40,7 @@ func (cli *DockerCli) CmdRestore(args ...string) error {
 			TcpEstablished:          *flCheckTcp,
 			ExternalUnixConnections: *flExtUnix,
 			ShellJob:                *flShell,
+			FileLocks:               *flFileLocks,
 		},
 		ForceRestore: *flForce,
 	}

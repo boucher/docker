@@ -21,6 +21,7 @@ func (cli *DockerCli) CmdCheckpoint(args ...string) error {
 		flCheckTcp     = cmd.Bool([]string{"-allow-tcp"}, false, "allow checkpointing tcp connections")
 		flExtUnix      = cmd.Bool([]string{"-allow-ext-unix"}, false, "allow checkpointing external unix connections")
 		flShell        = cmd.Bool([]string{"-allow-shell"}, false, "allow checkpointing shell jobs")
+		flFileLocks    = cmd.Bool([]string{"-file-locks"}, false, "allow handling file locks")
 	)
 
 	if err := cmd.ParseFlags(args, true); err != nil {
@@ -39,6 +40,7 @@ func (cli *DockerCli) CmdCheckpoint(args ...string) error {
 		TcpEstablished:          *flCheckTcp,
 		ExternalUnixConnections: *flExtUnix,
 		ShellJob:                *flShell,
+		FileLocks:               *flFileLocks,
 	}
 
 	var encounteredError error
