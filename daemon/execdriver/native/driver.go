@@ -310,6 +310,7 @@ func libcontainerCriuOpts(runconfigOpts *runconfig.CriuConfig) *libcontainer.Cri
 		TcpEstablished:          runconfigOpts.TcpEstablished,
 		ExternalUnixConnections: runconfigOpts.ExternalUnixConnections,
 		ShellJob:                runconfigOpts.ShellJob,
+		FileLocks:               runconfigOpts.FileLocks,
 	}
 }
 

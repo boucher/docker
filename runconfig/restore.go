@@ -7,6 +7,7 @@ type CriuConfig struct {
 	TcpEstablished          bool
 	ExternalUnixConnections bool
 	ShellJob                bool
+	FileLocks               bool
 }
 
 type RestoreConfig struct {
