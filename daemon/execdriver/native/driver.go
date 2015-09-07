@@ -303,7 +303,7 @@ func (d *Driver) Unpause(c *execdriver.Command) error {
 }
 
 func libcontainerCriuOpts(runconfigOpts *runconfig.CriuConfig) *libcontainer.CriuOpts {
-	return &libcontainer.CriuOpts{
+	criuopts := &libcontainer.CriuOpts{
 		ImagesDirectory:         runconfigOpts.ImagesDirectory,
 		WorkDirectory:           runconfigOpts.WorkDirectory,
 		LeaveRunning:            runconfigOpts.LeaveRunning,
@@ -312,6 +312,15 @@ func libcontainerCriuOpts(runconfigOpts *runconfig.CriuConfig) *libcontainer.Cri
 		ShellJob:                runconfigOpts.ShellJob,
 		FileLocks:               runconfigOpts.FileLocks,
 	}
+
+	for _, i := range runconfigOpts.VethPairs {
+		criuopts.VethPairs = append(criuopts.VethPairs,
+			libcontainer.VethPairName{
+				InName:  i.InName,
+				OutName: i.OutName,
+			})
+	}
+	return criuopts
 }
 
 func (d *Driver) Checkpoint(c *execdriver.Command, opts *runconfig.CriuConfig) error {
