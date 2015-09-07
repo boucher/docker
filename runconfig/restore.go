@@ -1,5 +1,10 @@
 package runconfig
 
+type VethPairName struct {
+	InName  string
+	OutName string
+}
+
 type CriuConfig struct {
 	ImagesDirectory         string
 	WorkDirectory           string
@@ -8,6 +13,7 @@ type CriuConfig struct {
 	ExternalUnixConnections bool
 	ShellJob                bool
 	FileLocks               bool
+	VethPairs               []VethPairName
 }
 
 type RestoreConfig struct {
