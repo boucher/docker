@@ -186,7 +186,7 @@ func (daemon *Daemon) verifyVolumesInfo(container *Container) error {
 	// to versions >= 1.7 and the MountPoints has not been populated with volumes data.
 	if len(container.MountPoints) == 0 && len(container.Volumes) > 0 {
 		for destination, hostPath := range container.Volumes {
-			vfsPath := filepath.Join(daemon.root, "vfs", "dir")
+			vfsPath := filepath.Join(daemon.Root, "vfs", "dir")
 			rw := container.VolumesRW != nil && container.VolumesRW[destination]
 
 			if strings.HasPrefix(hostPath, vfsPath) {

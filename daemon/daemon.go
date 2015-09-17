@@ -111,7 +111,7 @@ type Daemon struct {
 	EventsService    *events.Events
 	netController    libnetwork.NetworkController
 	volumes          *volumeStore
-	root             string
+	Root             string
 	shutdown         bool
 }
 
@@ -772,7 +772,7 @@ func NewDaemon(config *Config, registryService *registry.Service) (daemon *Daemo
 	d.RegistryService = registryService
 	d.EventsService = eventsService
 	d.volumes = volStore
-	d.root = config.Root
+	d.Root = config.Root
 	go d.execCommandGC()
 
 	if err := d.restore(); err != nil {

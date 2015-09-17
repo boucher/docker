@@ -322,6 +322,8 @@ func (d *Driver) Checkpoint(c *execdriver.Command, opts *runconfig.CriuConfig) e
 
 	d.Lock()
 	defer d.Unlock()
+	opts.ImagesDirectory = filepath.Join(opts.ImagesDirectory, "execdriver", "native")
+	opts.WorkDirectory = filepath.Join(opts.WorkDirectory, "execdriver", "native")
 	err := active.Checkpoint(libcontainerCriuOpts(opts))
 	if err != nil {
 		return err
@@ -372,6 +374,9 @@ func (d *Driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, restore
 		cont.Destroy()
 		d.cleanContainer(c.ID)
 	}()
+
+	opts.ImagesDirectory = filepath.Join(opts.ImagesDirectory, "execdriver", "native")
+	opts.WorkDirectory = filepath.Join(opts.WorkDirectory, "execdriver", "native")
 
 	if err := cont.Restore(p, libcontainerCriuOpts(opts)); err != nil {
 		return execdriver.ExitStatus{ExitCode: -1}, err

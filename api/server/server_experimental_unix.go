@@ -42,6 +42,8 @@ func (s *Server) postContainersCheckpoint(version version.Version, w http.Respon
 		return err
 	}
 
+	criuOpts.ImagesDirectory = s.daemon.Root
+	criuOpts.WorkDirectory = s.daemon.Root
 	if err := s.daemon.ContainerCheckpoint(vars["name"], criuOpts); err != nil {
 		return err
 	}
@@ -63,6 +65,8 @@ func (s *Server) postContainersRestore(version version.Version, w http.ResponseW
 		return err
 	}
 
+	restoreOpts.CriuOpts.ImagesDirectory = s.daemon.Root
+	restoreOpts.CriuOpts.WorkDirectory = s.daemon.Root
 	if err := s.daemon.ContainerRestore(vars["name"], &restoreOpts.CriuOpts, restoreOpts.ForceRestore); err != nil {
 		return err
 	}
