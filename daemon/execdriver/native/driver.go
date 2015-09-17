@@ -314,7 +314,7 @@ func libcontainerCriuOpts(runconfigOpts *runconfig.CriuConfig) *libcontainer.Cri
 	}
 }
 
-func (d *Driver) Checkpoint(c *execdriver.Command, opts *runconfig.CriuConfig) error {
+func (d *Driver) Checkpoint(c *execdriver.Command, opts *runconfig.CriuConfig, daemonRoot string) error {
 	active := d.activeContainers[c.ID]
 	if active == nil {
 		return fmt.Errorf("active container for %s does not exist", c.ID)
@@ -322,6 +322,22 @@ func (d *Driver) Checkpoint(c *execdriver.Command, opts *runconfig.CriuConfig) e
 
 	d.Lock()
 	defer d.Unlock()
+
+	if opts.ImagesDirectory == "" {
+		// By default, images will be store in /var/lib/docker/execdriver
+		opts.ImagesDirectory = filepath.Join(daemonRoot, "execdriver", "native", c.ID, "criu.image")
+		if err := os.MkdirAll(opts.ImagesDirectory, 0755); err != nil && !os.IsExist(err) {
+			return err
+		}
+	}
+
+	if opts.WorkDirectory == "" {
+		opts.WorkDirectory = filepath.Join(daemonRoot, "execdriver", "native", c.ID, "criu.work")
+		if err := os.MkdirAll(opts.WorkDirectory, 0755); err != nil && !os.IsExist(err) {
+			return err
+		}
+	}
+
 	err := active.Checkpoint(libcontainerCriuOpts(opts))
 	if err != nil {
 		return err
@@ -330,7 +346,7 @@ func (d *Driver) Checkpoint(c *execdriver.Command, opts *runconfig.CriuConfig) e
 	return nil
 }
 
-func (d *Driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback, opts *runconfig.CriuConfig, forceRestore bool) (execdriver.ExitStatus, error) {
+func (d *Driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback, opts *runconfig.CriuConfig, forceRestore bool, daemonRoot string) (execdriver.ExitStatus, error) {
 	var (
 		cont libcontainer.Container
 		err  error
@@ -372,6 +388,15 @@ func (d *Driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, restore
 		cont.Destroy()
 		d.cleanContainer(c.ID)
 	}()
+
+	if opts.ImagesDirectory == "" {
+		// By default, images will be store in /var/lib/docker/execdriver
+		opts.ImagesDirectory = filepath.Join(daemonRoot, "execdriver", "native", c.ID, "criu.image")
+	}
+
+	if opts.WorkDirectory == "" {
+		opts.WorkDirectory = filepath.Join(daemonRoot, "execdriver", "native", c.ID, "criu.work")
+	}
 
 	if err := cont.Restore(p, libcontainerCriuOpts(opts)); err != nil {
 		return execdriver.ExitStatus{ExitCode: -1}, err

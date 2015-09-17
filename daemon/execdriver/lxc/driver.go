@@ -561,11 +561,11 @@ func (d *Driver) Unpause(c *execdriver.Command) error {
 	return err
 }
 
-func (d *Driver) Checkpoint(c *execdriver.Command, opts *runconfig.CriuConfig) error {
+func (d *Driver) Checkpoint(c *execdriver.Command, opts *runconfig.CriuConfig, daemonRoot string) error {
 	return fmt.Errorf("Checkpointing lxc containers not supported yet\n")
 }
 
-func (d *Driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback, opts *runconfig.CriuConfig, forceRestore bool) (execdriver.ExitStatus, error) {
+func (d *Driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback, opts *runconfig.CriuConfig, forceRestore bool, daemonRoot string) (execdriver.ExitStatus, error) {
 	return execdriver.ExitStatus{ExitCode: 0}, fmt.Errorf("Restoring lxc containers not supported yet\n")
 }
 
