@@ -42,15 +42,6 @@ func (s *Server) postContainersCheckpoint(version version.Version, w http.Respon
 		return err
 	}
 
-	if criuOpts.ImagesDirectory == "" {
-		// By default, images will be store in /var/lib/docker/execdriver
-		criuOpts.ImagesDirectory = s.daemon.Root
-	}
-
-	if criuOpts.WorkDirectory == "" {
-		criuOpts.WorkDirectory = s.daemon.Root
-	}
-
 	if err := s.daemon.ContainerCheckpoint(vars["name"], criuOpts); err != nil {
 		return err
 	}
@@ -70,14 +61,6 @@ func (s *Server) postContainersRestore(version version.Version, w http.ResponseW
 	restoreOpts := runconfig.RestoreConfig{}
 	if err := json.NewDecoder(r.Body).Decode(&restoreOpts); err != nil {
 		return err
-	}
-
-	if restoreOpts.CriuOpts.ImagesDirectory == "" {
-		restoreOpts.CriuOpts.ImagesDirectory = s.daemon.Root
-	}
-
-	if restoreOpts.CriuOpts.WorkDirectory == "" {
-		restoreOpts.CriuOpts.WorkDirectory = s.daemon.Root
 	}
 
 	if err := s.daemon.ContainerRestore(vars["name"], &restoreOpts.CriuOpts, restoreOpts.ForceRestore); err != nil {

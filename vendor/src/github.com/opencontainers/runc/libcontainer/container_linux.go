@@ -324,23 +324,19 @@ func (c *linuxContainer) Checkpoint(criuOpts *CriuOpts) error {
 
 	if criuOpts.ImagesDirectory == "" {
 		criuOpts.ImagesDirectory = filepath.Join(c.root, "criu.image")
-	} else {
-		criuOpts.ImagesDirectory = filepath.Join(criuOpts.ImagesDirectory, c.id, "criu.image")
 	}
 
 	// Since a container can be C/R'ed multiple times,
 	// the checkpoint directory may already exist.
-	if err := os.MkdirAll(criuOpts.ImagesDirectory, 0755); err != nil && !os.IsExist(err) {
+	if err := os.Mkdir(criuOpts.ImagesDirectory, 0755); err != nil && !os.IsExist(err) {
 		return err
 	}
 
 	if criuOpts.WorkDirectory == "" {
 		criuOpts.WorkDirectory = filepath.Join(c.root, "criu.work")
-	} else {
-		criuOpts.WorkDirectory = filepath.Join(criuOpts.WorkDirectory, c.id, "criu.work")
 	}
 
-	if err := os.MkdirAll(criuOpts.WorkDirectory, 0755); err != nil && !os.IsExist(err) {
+	if err := os.Mkdir(criuOpts.WorkDirectory, 0755); err != nil && !os.IsExist(err) {
 		return err
 	}
 
@@ -445,10 +441,7 @@ func (c *linuxContainer) Restore(process *Process, criuOpts *CriuOpts) error {
 
 	if criuOpts.WorkDirectory == "" {
 		criuOpts.WorkDirectory = filepath.Join(c.root, "criu.work")
-	} else {
-		criuOpts.WorkDirectory = filepath.Join(criuOpts.WorkDirectory, c.id, "criu.work")
 	}
-
 	// Since a container can be C/R'ed multiple times,
 	// the work directory may already exist.
 	if err := os.Mkdir(criuOpts.WorkDirectory, 0655); err != nil && !os.IsExist(err) {
@@ -463,8 +456,6 @@ func (c *linuxContainer) Restore(process *Process, criuOpts *CriuOpts) error {
 
 	if criuOpts.ImagesDirectory == "" {
 		criuOpts.ImagesDirectory = filepath.Join(c.root, "criu.image")
-	} else {
-		criuOpts.ImagesDirectory = filepath.Join(criuOpts.ImagesDirectory, c.id, "criu.image")
 	}
 	imageDir, err := os.Open(criuOpts.ImagesDirectory)
 	if err != nil {
