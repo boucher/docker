@@ -111,7 +111,7 @@ type Daemon struct {
 	EventsService    *events.Events
 	netController    libnetwork.NetworkController
 	volumes          *volumeStore
-	root             string
+	Root             string
 	shutdown         bool
 }
 
@@ -772,7 +772,7 @@ func NewDaemon(config *Config, registryService *registry.Service) (daemon *Daemo
 	d.RegistryService = registryService
 	d.EventsService = eventsService
 	d.volumes = volStore
-	d.root = config.Root
+	d.Root = config.Root
 	go d.execCommandGC()
 
 	if err := d.restore(); err != nil {
@@ -890,7 +890,8 @@ func (daemon *Daemon) run(c *Container, pipes *execdriver.Pipes, startCallback e
 }
 
 func (daemon *Daemon) Checkpoint(c *Container, opts *runconfig.CriuConfig) error {
-	if err := daemon.execDriver.Checkpoint(c.command, opts); err != nil {
+
+	if err := daemon.execDriver.Checkpoint(c.command, opts, daemon.Root); err != nil {
 		return err
 	}
 	c.SetCheckpointed(opts.LeaveRunning)
@@ -904,7 +905,7 @@ func (daemon *Daemon) Restore(c *Container, pipes *execdriver.Pipes, restoreCall
 		return execdriver.ExitStatus{ExitCode: 0}, err
 	}
 
-	exitCode, err := daemon.execDriver.Restore(c.command, pipes, restoreCallback, opts, forceRestore)
+	exitCode, err := daemon.execDriver.Restore(c.command, pipes, restoreCallback, opts, forceRestore, daemon.Root)
 	return exitCode, err
 }
 

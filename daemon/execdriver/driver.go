@@ -74,10 +74,10 @@ type Driver interface {
 	Unpause(c *Command) error
 
 	// Checkpoints a container (with criu).
-	Checkpoint(c *Command, opts *runconfig.CriuConfig) error
+	Checkpoint(c *Command, opts *runconfig.CriuConfig, daemonRoot string) error
 
 	// Restores a checkpoint image into a container (with criu).
-	Restore(c *Command, pipes *Pipes, restoreCallback RestoreCallback, opts *runconfig.CriuConfig, forceRestore bool) (ExitStatus, error)
+	Restore(c *Command, pipes *Pipes, restoreCallback RestoreCallback, opts *runconfig.CriuConfig, forceRestore bool, daemonRoot string) (ExitStatus, error)
 
 	// Name returns the name of the driver.
 	Name() string
