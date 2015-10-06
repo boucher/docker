@@ -348,53 +348,6 @@ func mergeDevices(defaultDevices, userDevices []*configs.Device) []*configs.Devi
 	return append(devs, userDevices...)
 }
 
-// Like populateCommand() but for restoring a container.
-//
-// XXX populateCommand() does a lot more.  Not sure if we have
-//     to do everything it does.
-func populateCommandRestore(c *Container, env []string) error {
-	resources := &execdriver.Resources{
-		Memory:     c.Config.Memory,
-		MemorySwap: c.Config.MemorySwap,
-		CpuShares:  c.Config.CpuShares,
-		Cpuset:     c.Config.Cpuset,
-	}
-
-	processConfig := execdriver.ProcessConfig{
-		Privileged: c.hostConfig.Privileged,
-		Entrypoint: c.Path,
-		Arguments:  c.Args,
-		Tty:        c.Config.Tty,
-		User:       c.Config.User,
-	}
-
-	processConfig.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	processConfig.Env = env
-
-	c.command = &execdriver.Command{
-		ID:             c.ID,
-		Rootfs:         c.RootfsPath(),
-		ReadonlyRootfs: c.hostConfig.ReadonlyRootfs,
-		InitPath:       "/.dockerinit",
-		WorkingDir:     c.Config.WorkingDir,
-		// Network:     en,
-		// Ipc:         ipc,
-		// Pid:         pid,
-		Resources: resources,
-		// AllowedDevices: allowedDevices,
-		// AutoCreatedDevices: autoCreatedDevices,
-		CapAdd:        c.hostConfig.CapAdd,
-		CapDrop:       c.hostConfig.CapDrop,
-		ProcessConfig: processConfig,
-		ProcessLabel:  c.GetProcessLabel(),
-		MountLabel:    c.GetMountLabel(),
-		// LxcConfig:  lxcConfig,
-		AppArmorProfile: c.AppArmorProfile,
-	}
-
-	return nil
-}
-
 // GetSize, return real size, virtual size
 func (container *Container) getSize() (int64, int64) {
 	var (
@@ -747,7 +700,7 @@ func (container *Container) updateNetwork() error {
 	return nil
 }
 
-func (container *Container) buildCreateEndpointOptions() ([]libnetwork.EndpointOption, error) {
+func (container *Container) buildCreateEndpointOptions(isRestoring bool) ([]libnetwork.EndpointOption, error) {
 	var (
 		portSpecs     = make(nat.PortSet)
 		bindings      = make(nat.PortMap)
@@ -825,6 +778,14 @@ func (container *Container) buildCreateEndpointOptions() ([]libnetwork.EndpointO
 		createOptions = append(createOptions, libnetwork.EndpointOptionGeneric(genericOption))
 	}
 
+	/*if isRestoring && container.NetworkSettings.IPAddress != "" {
+		genericOption := options.Generic{
+			netlabel.IPAddress: net.ParseIP(container.NetworkSettings.IPAddress),
+		}
+
+		createOptions = append(createOptions, libnetwork.EndpointOptionGeneric(genericOption))
+	}*/
+
 	return createOptions, nil
 }
 
@@ -859,7 +820,7 @@ func createNetwork(controller libnetwork.NetworkController, dnet string, driver 
 	return controller.NewNetwork(driver, dnet, createOptions...)
 }
 
-func (container *Container) allocateNetwork() error {
+func (container *Container) allocateNetwork(isRestoring bool) error {
 	mode := container.hostConfig.NetworkMode
 	controller := container.daemon.netController
 	if container.Config.NetworkDisabled || mode.IsContainer() {
@@ -893,14 +854,14 @@ func (container *Container) allocateNetwork() error {
 		service = strings.Replace(service, "/", "", -1)
 	}
 
-	if err := container.configureNetwork(networkName, service, networkDriver, mode.IsDefault()); err != nil {
+	if err := container.configureNetwork(networkName, service, networkDriver, mode.IsDefault(), isRestoring); err != nil {
 		return err
 	}
 
 	return container.writeHostConfig()
 }
 
-func (container *Container) configureNetwork(networkName, service, networkDriver string, canCreateNetwork bool) error {
+func (container *Container) configureNetwork(networkName, service, networkDriver string, canCreateNetwork bool, isRestoring bool) error {
 	controller := container.daemon.netController
 
 	n, err := controller.NetworkByName(networkName)
@@ -920,7 +881,7 @@ func (container *Container) configureNetwork(networkName, service, networkDriver
 			return err
 		}
 
-		createOptions, err := container.buildCreateEndpointOptions()
+		createOptions, err := container.buildCreateEndpointOptions(isRestoring)
 		if err != nil {
 			return err
 		}
@@ -967,7 +928,7 @@ func (container *Container) configureNetwork(networkName, service, networkDriver
 	return nil
 }
 
-func (container *Container) initializeNetworking() error {
+func (container *Container) initializeNetworking(isRestoring bool) error {
 	var err error
 
 	if container.hostConfig.NetworkMode.IsContainer() {
@@ -998,7 +959,7 @@ func (container *Container) initializeNetworking() error {
 
 	}
 
-	if err := container.allocateNetwork(); err != nil {
+	if err := container.allocateNetwork(isRestoring); err != nil {
 		return err
 	}
 

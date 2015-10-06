@@ -34,7 +34,7 @@ func (container *Container) createDaemonEnvironment(linkedEnv []string) []string
 	return container.Config.Env
 }
 
-func (container *Container) initializeNetworking() error {
+func (container *Container) initializeNetworking(isRestoring bool) error {
 	return nil
 }
 

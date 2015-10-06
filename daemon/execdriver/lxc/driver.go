@@ -25,6 +25,7 @@ import (
 	sysinfo "github.com/docker/docker/pkg/system"
 	"github.com/docker/docker/pkg/term"
 	"github.com/docker/docker/pkg/version"
+	"github.com/docker/docker/runconfig"
 	"github.com/kr/pty"
 	"github.com/opencontainers/runc/libcontainer"
 	"github.com/opencontainers/runc/libcontainer/cgroups"
@@ -561,14 +562,17 @@ func (d *Driver) Unpause(c *execdriver.Command) error {
 	return err
 }
 
-func (d *driver) Checkpoint(c *execdriver.Command) error {
+// Checkpoint does not currently implement checkpoint, but complies to the Driver interface
+func (d *Driver) Checkpoint(c *execdriver.Command, opts *runconfig.CriuConfig) error {
 	return fmt.Errorf("Checkpointing lxc containers not supported yet\n")
 }
 
-func (d *driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback) (int, error) {
-	return 0, fmt.Errorf("Restoring lxc containers not supported yet\n")
+// Restore does not currently implement restore, but complies to the Driver interface
+func (d *Driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, hooks execdriver.Hooks, opts *runconfig.CriuConfig, forceRestore bool) (execdriver.ExitStatus, error) {
+	return execdriver.ExitStatus{ExitCode: 0}, fmt.Errorf("Restoring lxc containers not supported yet\n")
 }
 
+// Terminate implements the exec driver Driver interface.
 func (d *Driver) Terminate(c *execdriver.Command) error {
 	return killLxc(c.ID, 9)
 }
