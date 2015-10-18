@@ -1,5 +1,11 @@
 package runconfig
 
+
+type VethPairName struct {
+	InName  string
+	OutName string
+}
+
 // CriuConfig holds configuration options passed down to libcontainer and CRIU
 type CriuConfig struct {
 	ImagesDirectory         string
@@ -9,6 +15,7 @@ type CriuConfig struct {
 	ExternalUnixConnections bool
 	ShellJob                bool
 	FileLocks               bool
+	VethPairs               []VethPairName
 }
 
 // RestoreConfig holds the restore command options, which is a superset of the CRIU options

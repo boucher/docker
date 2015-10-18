@@ -5,6 +5,7 @@ import (
 
 	"github.com/docker/docker/pkg/promise"
 	"github.com/docker/docker/runconfig"
+	"github.com/docker/libnetwork/netutils"
 )
 
 // Checkpoint checkpoints the running container, saving its state afterwards
@@ -52,6 +53,41 @@ func (container *Container) Restore(opts *runconfig.CriuConfig, forceRestore boo
 	if err = container.initializeNetworking(true); err != nil {
 		return err
 	}
+
+	// This is an old implementation, to remove later
+	//
+	// nctl := container.daemon.netController
+	// network, err := nctl.NetworkByID(container.NetworkSettings.NetworkID)
+	// ep_t, err := network.EndpointByID(container.NetworkSettings.EndpointID)
+	// sb, err := nctl.SandboxByID(container.NetworkSettings.SandboxID)
+	// if err != nil {
+	//	return err
+	//}
+
+	// for _, i := range ep_t.SandboxInterfaces() {
+	// for _, i := range sb.Interfaces() {
+	//	outname, err := netutils.GenerateIfaceName("veth", 7)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	vethpair := runconfig.VethPairName{
+	//		InName:  i.DstName(),
+	//		OutName: outname,
+	//	}
+	//	opts.VethPairs = append(opts.VethPairs, vethpair)
+	// }
+
+	// TODO: the following implemtantion is temporary.
+	//       re-implmentation after libnetwork patch is merged to upstream
+	outname, err := netutils.GenerateIfaceName("veth", 7)
+	if err != nil {
+		return err
+	}
+	vethpair := runconfig.VethPairName{
+		InName:  "eth0",
+		OutName: outname,
+	}
+	opts.VethPairs = append(opts.VethPairs, vethpair)
 
 	linkedEnv, err := container.setupLinkedContainers()
 	if err != nil {

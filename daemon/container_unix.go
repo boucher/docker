@@ -875,20 +875,51 @@ func (container *Container) configureNetwork(networkName, service, networkDriver
 		}
 	}
 
-	ep, err := n.EndpointByName(service)
-	if err != nil {
-		if _, ok := err.(libnetwork.ErrNoSuchEndpoint); !ok {
-			return err
-		}
+	var ep libnetwork.Endpoint
 
-		createOptions, err := container.buildCreateEndpointOptions(isRestoring)
-		if err != nil {
-			return err
+	if isRestoring == true {
+		// Use existing Endpoint for a checkpointed container
+		for _, endpoint := range n.Endpoints() {
+			if endpoint.ID() == container.NetworkSettings.EndpointID {
+				ep = endpoint
+			}
 		}
+		if ep == nil {
+			//return fmt.Errorf("Fail to find the Endpoint for the checkpointed container")
+			fmt.Println("Fail to find the Endpoint for the checkpointed container")
+			ep, err = n.EndpointByName(service)
+			if err != nil {
+				if _, ok := err.(libnetwork.ErrNoSuchEndpoint); !ok {
+					return err
+				}
 
-		ep, err = n.CreateEndpoint(service, createOptions...)
+				createOptions, err := container.buildCreateEndpointOptions(isRestoring)
+				if err != nil {
+					return err
+				}
+
+				ep, err = n.CreateEndpoint(service, createOptions...)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	} else {
+		ep, err = n.EndpointByName(service)
 		if err != nil {
-			return err
+			if _, ok := err.(libnetwork.ErrNoSuchEndpoint); !ok {
+				return err
+			}
+
+			createOptions, err := container.buildCreateEndpointOptions(isRestoring)
+			if err != nil {
+				return err
+			}
+
+			ep, err = n.CreateEndpoint(service, createOptions...)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1041,7 +1072,7 @@ func (container *Container) getNetworkedContainer() (*Container, error) {
 	}
 }
 
-func (container *Container) releaseNetwork() {
+func (container *Container) releaseNetwork(is_checkpoint bool) {
 	if container.hostConfig.NetworkMode.IsContainer() || container.Config.NetworkDisabled {
 		return
 	}
@@ -1076,6 +1107,10 @@ func (container *Container) releaseNetwork() {
 
 	if err := sb.Delete(); err != nil {
 		logrus.Errorf("Error deleting sandbox id %s for container %s: %v", sid, container.ID, err)
+		return
+	}
+
+	if is_checkpoint == true {
 		return
 	}
 
