@@ -304,7 +304,7 @@ func (d *Driver) Unpause(c *execdriver.Command) error {
 }
 
 func libcontainerCriuOpts(runconfigOpts *runconfig.CriuConfig) *libcontainer.CriuOpts {
-	return &libcontainer.CriuOpts{
+	criuopts := &libcontainer.CriuOpts{
 		ImagesDirectory:         runconfigOpts.ImagesDirectory,
 		WorkDirectory:           runconfigOpts.WorkDirectory,
 		LeaveRunning:            runconfigOpts.LeaveRunning,
@@ -313,6 +313,15 @@ func libcontainerCriuOpts(runconfigOpts *runconfig.CriuConfig) *libcontainer.Cri
 		ShellJob:                runconfigOpts.ShellJob,
 		FileLocks:               runconfigOpts.FileLocks,
 	}
+
+	for _, i := range runconfigOpts.VethPairs {
+	criuopts.VethPairs = append(criuopts.VethPairs,
+		libcontainer.VethPairName{
+			ContainerInterfaceName: i.ContainerInterfaceName,
+			HostInterfaceName: i.HostInterfaceName,
+		})
+	}
+	return criuopts
 }
 
 // Checkpoint implements the exec driver Driver interface.
