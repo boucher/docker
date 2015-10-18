@@ -317,8 +317,8 @@ func libcontainerCriuOpts(runconfigOpts *runconfig.CriuConfig) *libcontainer.Cri
 	for _, i := range runconfigOpts.VethPairs {
 	criuopts.VethPairs = append(criuopts.VethPairs,
 		libcontainer.VethPairName{
-			ContainerInterfaceName: i.InName,
-			HostInterfaceName: i.OutName,
+			ContainerInterfaceName: i.ContainerInterfaceName,
+			HostInterfaceName: i.HostInterfaceName,
 		})
 	}
 	return criuopts

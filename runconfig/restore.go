@@ -2,8 +2,8 @@ package runconfig
 
 
 type VethPairName struct {
-	InName  string
-	OutName string
+	ContainerInterfaceName string
+	HostInterfaceName string
 }
 
 // CriuConfig holds configuration options passed down to libcontainer and CRIU

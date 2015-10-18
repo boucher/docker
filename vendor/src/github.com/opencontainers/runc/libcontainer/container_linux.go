@@ -534,8 +534,6 @@ func (c *linuxContainer) Restore(process *Process, criuOpts *CriuOpts) error {
 			break
 		}
 	}
-
-	/* XXX, we can not get interface from config */
 	for _, iface := range c.config.Networks {
 		switch iface.Type {
 		case "veth":
@@ -548,10 +546,9 @@ func (c *linuxContainer) Restore(process *Process, criuOpts *CriuOpts) error {
 			break
 		}
 	}
-
 	for _, i := range criuOpts.VethPairs {
 		veth := new(criurpc.CriuVethPair)
-		veth.IfOut = proto.String(i.HostInterfaceName + "@docker0")
+		veth.IfOut = proto.String(i.HostInterfaceName)
 		veth.IfIn = proto.String(i.ContainerInterfaceName)
 		req.Opts.Veths = append(req.Opts.Veths, veth)
 	}

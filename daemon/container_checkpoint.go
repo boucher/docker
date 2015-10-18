@@ -77,15 +77,16 @@ func (container *Container) Restore(opts *runconfig.CriuConfig, forceRestore boo
 	//	opts.VethPairs = append(opts.VethPairs, vethpair)
 	// }
 
-	// TODO: the following implemtantion is temporary.
-	//       re-implmentation after libnetwork patch is merged to upstream
+	// TODO: the following implemtantion is temporary, wrong, but works for
+	//       container with only eth0.
+	//       Re-implmentation after libnetwork patch is merged to upstream
 	outname, err := netutils.GenerateIfaceName("veth", 7)
 	if err != nil {
 		return err
 	}
 	vethpair := runconfig.VethPairName{
-		InName:  "eth0",
-		OutName: outname,
+		ContainerInterfaceName: "eth0",
+		HostInterfaceName: outname + "@docker0",
 	}
 	opts.VethPairs = append(opts.VethPairs, vethpair)
 
