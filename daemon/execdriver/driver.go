@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/docker/docker/pkg/idtools"
+	"github.com/docker/docker/runconfig"
 	"github.com/opencontainers/runc/libcontainer"
 	"github.com/opencontainers/runc/libcontainer/configs"
 )
@@ -39,9 +40,9 @@ type Hooks struct {
 	Start DriverCallback
 	// PostStop is called after the container process exits
 	PostStop []DriverCallback
+	// Restore is called after the container is restored
+	Restore DriverCallback
 }
-
-type RestoreCallback func(*ProcessConfig, int)
 
 // Info is driver specific information based on
 // processes registered with the driver
@@ -85,9 +86,11 @@ type Driver interface {
 	// Unpause unpauses a container.
 	Unpause(c *Command) error
 
-	Checkpoint(c *Command) error
+	// Checkpoints a container (with criu).
+	Checkpoint(c *Command, opts *runconfig.CriuConfig) error
 
-	Restore(c *Command, pipes *Pipes, restoreCallback RestoreCallback) (int, error)
+	// Restores a checkpoint image into a container (with criu).
+	Restore(c *Command, pipes *Pipes, hooks Hooks, opts *runconfig.CriuConfig, forceRestore bool) (ExitStatus, error)
 
 	// Name returns the name of the driver.
 	Name() string

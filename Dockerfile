@@ -32,9 +32,11 @@ RUN	echo deb http://ppa.launchpad.net/zfs-native/stable/ubuntu trusty main > /et
 # Packaged dependencies
 RUN apt-get update && apt-get install -y \
 	apparmor \
+	asciidoc \
 	aufs-tools \
 	automake \
 	bash-completion \
+	bsdmainutils \
 	btrfs-tools \
 	build-essential \
 	createrepo \
@@ -43,21 +45,29 @@ RUN apt-get update && apt-get install -y \
 	gcc-mingw-w64 \
 	git \
 	iptables \
+	libaio-dev \
 	libapparmor-dev \
 	libcap-dev \
+	libprotobuf-c0-dev \
+	libprotobuf-dev	\
 	libsqlite3-dev \
 	libsystemd-journal-dev \
 	mercurial \
 	parallel \
 	pkg-config \
+	protobuf-compiler \
+	protobuf-c-compiler \
+	python-minimal \
 	python-mock \
 	python-pip \
+	python-protobuf \
 	python-websocket \
 	reprepro \
 	ruby1.9.1 \
 	ruby1.9.1-dev \
 	s3cmd=1.1.0* \
 	ubuntu-zfs \
+	xmlto \
 	libzfs-dev \
 	--no-install-recommends
 
@@ -81,6 +91,13 @@ RUN cd /usr/src/lxc \
 	&& make \
 	&& make install \
 	&& ldconfig
+
+# Install Criu
+RUN mkdir -p /usr/src/criu \
+	&& curl -sSL https://github.com/xemul/criu/archive/v1.6.tar.gz | tar -v -C /usr/src/criu/ -xz --strip-components=1
+RUN cd /usr/src/criu \
+	&& make \
+	&& make install
 
 # Install Go
 ENV GO_VERSION 1.5.1

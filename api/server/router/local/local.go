@@ -149,6 +149,8 @@ func (r *router) initRoutes() {
 		NewDeleteRoute("/images/{name:.*}", r.deleteImages),
 		NewDeleteRoute("/volumes/{name:.*}", r.deleteVolumes),
 	}
+
+	addExperimentalRoutes(r)
 }
 
 func optionsHandler(ctx context.Context, w http.ResponseWriter, r *http.Request, vars map[string]string) error {

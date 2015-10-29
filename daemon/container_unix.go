@@ -378,53 +378,6 @@ func mergeDevices(defaultDevices, userDevices []*configs.Device) []*configs.Devi
 	return append(devs, userDevices...)
 }
 
-// Like populateCommand() but for restoring a container.
-//
-// XXX populateCommand() does a lot more.  Not sure if we have
-//     to do everything it does.
-func populateCommandRestore(c *Container, env []string) error {
-	resources := &execdriver.Resources{
-		Memory:     c.Config.Memory,
-		MemorySwap: c.Config.MemorySwap,
-		CpuShares:  c.Config.CpuShares,
-		Cpuset:     c.Config.Cpuset,
-	}
-
-	processConfig := execdriver.ProcessConfig{
-		Privileged: c.hostConfig.Privileged,
-		Entrypoint: c.Path,
-		Arguments:  c.Args,
-		Tty:        c.Config.Tty,
-		User:       c.Config.User,
-	}
-
-	processConfig.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	processConfig.Env = env
-
-	c.command = &execdriver.Command{
-		ID:             c.ID,
-		Rootfs:         c.RootfsPath(),
-		ReadonlyRootfs: c.hostConfig.ReadonlyRootfs,
-		InitPath:       "/.dockerinit",
-		WorkingDir:     c.Config.WorkingDir,
-		// Network:     en,
-		// Ipc:         ipc,
-		// Pid:         pid,
-		Resources: resources,
-		// AllowedDevices: allowedDevices,
-		// AutoCreatedDevices: autoCreatedDevices,
-		CapAdd:        c.hostConfig.CapAdd,
-		CapDrop:       c.hostConfig.CapDrop,
-		ProcessConfig: processConfig,
-		ProcessLabel:  c.GetProcessLabel(),
-		MountLabel:    c.GetMountLabel(),
-		// LxcConfig:  lxcConfig,
-		AppArmorProfile: c.AppArmorProfile,
-	}
-
-	return nil
-}
-
 // GetSize, return real size, virtual size
 func (container *Container) getSize() (int64, int64) {
 	var (
@@ -865,7 +818,7 @@ func (container *Container) updateNetwork() error {
 	return nil
 }
 
-func (container *Container) buildCreateEndpointOptions(n libnetwork.Network) ([]libnetwork.EndpointOption, error) {
+func (container *Container) buildCreateEndpointOptions(n libnetwork.Network, isRestoring bool) ([]libnetwork.EndpointOption, error) {
 	var (
 		portSpecs     = make(nat.PortSet)
 		bindings      = make(nat.PortMap)
@@ -945,6 +898,13 @@ func (container *Container) buildCreateEndpointOptions(n libnetwork.Network) ([]
 
 	if n.Name() == "bridge" || container.NetworkSettings.IsAnonymousEndpoint {
 		createOptions = append(createOptions, libnetwork.CreateOptionAnonymous())
+		/*if isRestoring && container.NetworkSettings.IPAddress != "" {
+			genericOption := options.Generic{
+				netlabel.IPAddress: net.ParseIP(container.NetworkSettings.IPAddress),
+			}
+
+			createOptions = append(createOptions, libnetwork.EndpointOptionGeneric(genericOption))
+		}*/
 	}
 
 	return createOptions, nil
@@ -966,7 +926,7 @@ func createNetwork(controller libnetwork.NetworkController, dnet string, driver 
 	return controller.NewNetwork(driver, dnet, createOptions...)
 }
 
-func (container *Container) allocateNetwork() error {
+func (container *Container) allocateNetwork(isRestoring bool) error {
 	updateSettings := false
 	if len(container.NetworkSettings.Networks) == 0 {
 		mode := container.hostConfig.NetworkMode
@@ -985,7 +945,7 @@ func (container *Container) allocateNetwork() error {
 	}
 
 	for n := range container.NetworkSettings.Networks {
-		if err := container.connectToNetwork(n, updateSettings); err != nil {
+		if err := container.connectToNetwork(n, updateSettings, isRestoring); err != nil {
 			return err
 		}
 	}
@@ -998,10 +958,10 @@ func (container *Container) ConnectToNetwork(idOrName string) error {
 	if !container.Running {
 		return derr.ErrorCodeNotRunning.WithArgs(container.ID)
 	}
-	return container.connectToNetwork(idOrName, true)
+	return container.connectToNetwork(idOrName, true, false)
 }
 
-func (container *Container) connectToNetwork(idOrName string, updateSettings bool) error {
+func (container *Container) connectToNetwork(idOrName string, updateSettings bool, isRestoring bool) error {
 	var err error
 
 	if container.hostConfig.NetworkMode.IsContainer() {
@@ -1036,7 +996,7 @@ func (container *Container) connectToNetwork(idOrName string, updateSettings boo
 		return err
 	}
 
-	createOptions, err := container.buildCreateEndpointOptions(n)
+	createOptions, err := container.buildCreateEndpointOptions(n, isRestoring)
 	if err != nil {
 		return err
 	}
@@ -1090,7 +1050,7 @@ func (container *Container) connectToNetwork(idOrName string, updateSettings boo
 	return nil
 }
 
-func (container *Container) initializeNetworking() error {
+func (container *Container) initializeNetworking(isRestoring bool) error {
 	var err error
 
 	if container.hostConfig.NetworkMode.IsContainer() {
@@ -1121,7 +1081,7 @@ func (container *Container) initializeNetworking() error {
 
 	}
 
-	if err := container.allocateNetwork(); err != nil {
+	if err := container.allocateNetwork(isRestoring); err != nil {
 		return err
 	}
 

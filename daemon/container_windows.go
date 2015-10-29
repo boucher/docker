@@ -36,7 +36,7 @@ func (container *Container) createDaemonEnvironment(linkedEnv []string) []string
 	return container.Config.Env
 }
 
-func (container *Container) initializeNetworking() error {
+func (container *Container) initializeNetworking(isRestoring bool) error {
 	return nil
 }
 
@@ -161,7 +161,7 @@ func (container *Container) setNetworkNamespaceKey(pid int) error {
 }
 
 // allocateNetwork is a no-op on Windows.
-func (container *Container) allocateNetwork() error {
+func (container *Container) allocateNetwork(isRestoring bool) error {
 	return nil
 }
 
