@@ -60,6 +60,8 @@ type Container struct {
 
 	Volumes   map[string]string // Deprecated since 1.7, kept for backwards compatibility
 	VolumesRW map[string]bool   // Deprecated since 1.7, kept for backwards compatibility
+
+	CriuimagePaths map[string]string // Format: <image path: filesysem image ID>
 }
 
 func killProcessDirectly(container *Container) error {

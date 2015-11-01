@@ -610,6 +610,7 @@ func (daemon *Daemon) newBaseContainer(id string) *Container {
 		},
 		Volumes:   make(map[string]string),
 		VolumesRW: make(map[string]bool),
+		CriuimagePaths: make(map[string]string),
 	}
 }
 
