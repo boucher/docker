@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/docker/docker/pkg/promise"
 	"github.com/docker/docker/runconfig"
@@ -16,6 +17,26 @@ func (container *Container) Checkpoint(opts *runconfig.CriuConfig) error {
 	if opts.LeaveRunning == false {
 		container.cleanup()
 	}
+
+	// commit the filesystem as well
+	commitCfg := &ContainerCommitConfig{
+		Pause:  true,
+		Config: container.Config,
+	}
+	img, err := container.daemon.Commit(container, commitCfg)
+	if err != nil {
+		return err
+	}
+
+	// Update the criu image path and image ID of the container
+	criuImagePath := opts.ImagesDirectory
+	if criuImagePath == "" {
+		criuImagePath = filepath.Join(container.daemon.configStore.ExecRoot, "execdriver", container.daemon.configStore.ExecDriver, container.ID, "criu.image")
+	}
+	container.CriuimagePaths[criuImagePath] = img.ID
+
+	// Update image layer of the committed container
+	container.ImageID = img.ID
 
 	if err := container.toDisk(); err != nil {
 		return fmt.Errorf("Cannot update config for container: %s", err)
@@ -41,6 +62,10 @@ func (container *Container) Restore(opts *runconfig.CriuConfig, forceRestore boo
 			container.cleanup()
 		}
 	}()
+
+	if err := container.daemon.createRootfs(container); err != nil {
+		return err
+	}
 
 	if err := container.Mount(); err != nil {
 		return err
