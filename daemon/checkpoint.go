@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/docker/docker/runconfig"
 )
@@ -15,6 +17,22 @@ func (daemon *Daemon) ContainerCheckpoint(name string, opts *runconfig.CriuConfi
 	if !container.IsRunning() {
 		return fmt.Errorf("Container %s not running", name)
 	}
+
+	if opts.ImagesDirectory == "" {
+		// By default, images will be stored in /var/lib/docker/execdriver
+		opts.ImagesDirectory = filepath.Join(daemon.root, "execdriver", container.daemon.configStore.ExecDriver, container.ID, "criu.image")
+		if err := os.MkdirAll(opts.ImagesDirectory, 0755); err != nil && !os.IsExist(err) {
+			return err
+		}
+	}
+
+	if opts.WorkDirectory == "" {
+		opts.WorkDirectory = filepath.Join(daemon.root, "execdriver", container.daemon.configStore.ExecDriver, container.ID, "criu.work")
+		if err := os.MkdirAll(opts.WorkDirectory, 0755); err != nil && !os.IsExist(err) {
+			return err
+		}
+	}
+
 	if err := container.Checkpoint(opts); err != nil {
 		return fmt.Errorf("Cannot checkpoint container %s: %s", name, err)
 	}
@@ -44,6 +62,14 @@ func (daemon *Daemon) ContainerRestore(name string, opts *runconfig.CriuConfig, 
 		if !container.HasBeenCheckpointed() && opts.ImagesDirectory == "" {
 			return fmt.Errorf("You must specify an image directory to restore from %s", name)
 		}
+	}
+
+	if opts.ImagesDirectory == "" {
+		opts.ImagesDirectory = filepath.Join(daemon.root, "execdriver", container.daemon.configStore.ExecDriver, container.ID, "criu.image")
+	}
+
+	if opts.WorkDirectory == "" {
+		opts.WorkDirectory = filepath.Join(daemon.root, "execdriver", container.daemon.configStore.ExecDriver, container.ID, "criu.work")
 	}
 
 	if err = container.Restore(opts, forceRestore); err != nil {
