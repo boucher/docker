@@ -96,7 +96,7 @@ func (daemon *Daemon) containerStart(container *Container) (err error) {
 	// backwards API compatibility.
 	container.hostConfig = runconfig.SetDefaultNetModeIfBlank(container.hostConfig)
 
-	if err := daemon.initializeNetworking(container); err != nil {
+	if err := daemon.initializeNetworking(container, false); err != nil {
 		return err
 	}
 	linkedEnv, err := daemon.setupLinkedContainers(container)
@@ -146,7 +146,7 @@ func (daemon *Daemon) waitForStart(container *Container) error {
 func (daemon *Daemon) Cleanup(container *Container) {
 
 	if container.IsCheckpointed() {
-		log.CRDbg("not calling ReleaseNetwork() for checkpointed container %s", container.ID)
+		logrus.Debugf("not calling ReleaseNetwork() for checkpointed container %s", container.ID)
 	} else {
 		daemon.releaseNetwork(container)
 	}

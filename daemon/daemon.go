@@ -966,22 +966,18 @@ func (daemon *Daemon) Run(c *Container, pipes *execdriver.Pipes, startCallback e
 	return daemon.execDriver.Run(c.command, pipes, hooks)
 }
 
-func (daemon *Daemon) Checkpoint(c *Container) error {
-	if err := daemon.execDriver.Checkpoint(c.command); err != nil {
-		return err
-	}
-	c.SetCheckpointed()
-	return nil
+// Checkpoint the container
+func (daemon *Daemon) Checkpoint(c *Container, opts *runconfig.CriuConfig) error {
+	return daemon.execDriver.Checkpoint(c.command, opts)
 }
 
-func (daemon *Daemon) Restore(c *Container, pipes *execdriver.Pipes, restoreCallback execdriver.RestoreCallback) (int, error) {
-	// Mount the container's filesystem (daemon/graphdriver/aufs/aufs.go).
-	_, err := daemon.driver.Get(c.ID, c.GetMountLabel())
-	if err != nil {
-		return 0, err
+// Restore the container
+func (daemon *Daemon) Restore(c *Container, pipes *execdriver.Pipes, restoreCallback execdriver.DriverCallback, opts *runconfig.CriuConfig, forceRestore bool) (execdriver.ExitStatus, error) {
+	hooks := execdriver.Hooks{
+		Restore: restoreCallback,
 	}
 
-	exitCode, err := daemon.execDriver.Restore(c.command, pipes, restoreCallback)
+	exitCode, err := daemon.execDriver.Restore(c.command, pipes, hooks, opts, forceRestore)
 	return exitCode, err
 }
 

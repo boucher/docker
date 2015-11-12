@@ -31,6 +31,8 @@ type containerSupervisor interface {
 	StartLogging(*Container) error
 	// Run starts a container
 	Run(c *Container, pipes *execdriver.Pipes, startCallback execdriver.DriverCallback) (execdriver.ExitStatus, error)
+	// Restore restores a container that was previously checkpointed
+	Restore(c *Container, pipes *execdriver.Pipes, restoreCallback execdriver.DriverCallback, opts *runconfig.CriuConfig, forceRestore bool) (execdriver.ExitStatus, error)
 	// IsShuttingDown tells whether the supervisor is shutting down or not
 	IsShuttingDown() bool
 }
@@ -128,13 +130,29 @@ func (m *containerMonitor) Close() error {
 
 // Start starts the containers process and monitors it according to the restart policy
 func (m *containerMonitor) Start() error {
+	return m.start(nil, false)
+}
+
+// Restore restores the containers from an image and monitors it according to the restart policy
+func (m *containerMonitor) Restore(restoreOpts *runconfig.CriuConfig, forceRestore bool) error {
+	return m.start(restoreOpts, forceRestore)
+}
+
+// Internal method to start or restore the containers and monitors it
+func (m *containerMonitor) start(restoreOpts *runconfig.CriuConfig, forceRestore bool) error {
 	var (
 		err        error
 		exitStatus execdriver.ExitStatus
 		// this variable indicates where we in execution flow:
 		// before Run or after
-		afterRun bool
+		afterRun    bool
+		isRestoring bool
 	)
+
+	// we only want to restore once, but upon restart we should simply
+	// start the container normally, so isRestoring tells us where we are,
+	// and the initial value is whether or not we were provided restore opts
+	isRestoring = restoreOpts != nil
 
 	// ensure that when the monitor finally exits we release the networking and unmount the rootfs
 	defer func() {
@@ -156,19 +174,30 @@ func (m *containerMonitor) Start() error {
 	for {
 		m.container.RestartCount++
 
-		if err := m.supervisor.StartLogging(m.container); err != nil {
-			m.resetContainer(false)
+		if m.container.logDriver == nil {
+			if err := m.supervisor.StartLogging(m.container); err != nil {
+				m.resetContainer(false)
 
-			return err
+				return err
+			}
 		}
 
 		pipes := execdriver.NewPipes(m.container.stdin, m.container.stdout, m.container.stderr, m.container.Config.OpenStdin)
 
-		m.logEvent("start")
-
 		m.lastStartTime = time.Now()
 
-		if exitStatus, err = m.supervisor.Run(m.container, pipes, m.callback); err != nil {
+		if isRestoring {
+			m.logEvent("restore")
+
+			exitStatus, err = m.supervisor.Restore(m.container, pipes, m.restoreCallback, restoreOpts, forceRestore)
+			isRestoring = false
+		} else {
+			m.logEvent("start")
+
+			exitStatus, err = m.supervisor.Run(m.container, pipes, m.callback)
+		}
+
+		if err != nil {
 			// if we receive an internal error from the initial start of a container then lets
 			// return it instead of entering the restart loop
 			// set to 127 for container cmd not found/does not exist)
@@ -226,49 +255,6 @@ func (m *containerMonitor) Start() error {
 		m.resetContainer(true)
 		return err
 	}
-}
-
-// Like Start() but for restoring a container.
-func (m *containerMonitor) Restore() error {
-	var (
-		err error
-		// XXX The following line should be changed to
-		//     exitStatus execdriver.ExitStatus to match Start()
-		exitCode     int
-		afterRestore bool
-	)
-
-	defer func() {
-		if afterRestore {
-			m.container.Lock()
-			m.container.setStopped(&execdriver.ExitStatus{exitCode, false})
-			defer m.container.Unlock()
-		}
-		m.Close()
-	}()
-
-	if err := m.container.startLoggingToDisk(); err != nil {
-		m.resetContainer(false)
-		return err
-	}
-
-	pipes := execdriver.NewPipes(m.container.stdin, m.container.stdout, m.container.stderr, m.container.Config.OpenStdin)
-
-	m.container.LogEvent("restore")
-	m.lastStartTime = time.Now()
-	if exitCode, err = m.container.daemon.Restore(m.container, pipes, m.restoreCallback); err != nil {
-		log.Errorf("Error restoring container: %s, exitCode=%d", err, exitCode)
-		m.container.ExitCode = -1
-		m.resetContainer(false)
-		return err
-	}
-	afterRestore = true
-
-	m.container.ExitCode = exitCode
-	m.resetMonitor(err == nil && exitCode == 0)
-	m.container.LogEvent("die")
-	m.resetContainer(true)
-	return err
 }
 
 // resetMonitor resets the stateful fields on the containerMonitor based on the
@@ -367,7 +353,23 @@ func (m *containerMonitor) callback(processConfig *execdriver.ProcessConfig, pid
 }
 
 // Like callback() but for restoring a container.
-func (m *containerMonitor) restoreCallback(processConfig *execdriver.ProcessConfig, restorePid int) {
+func (m *containerMonitor) restoreCallback(processConfig *execdriver.ProcessConfig, restorePid int, chOOM <-chan struct{}) error {
+	go func() {
+		_, ok := <-chOOM
+		if ok {
+			m.logEvent("oom")
+		}
+	}()
+
+	if processConfig.Tty {
+		// The callback is called after the process Start()
+		// so we are in the parent process. In TTY mode, stdin/out/err is the PtySlave
+		// which we close here.
+		if c, ok := processConfig.Stdout.(io.Closer); ok {
+			c.Close()
+		}
+	}
+
 	// If restorePid is 0, it means that restore failed.
 	if restorePid != 0 {
 		m.container.setRunning(restorePid)
@@ -383,10 +385,12 @@ func (m *containerMonitor) restoreCallback(processConfig *execdriver.ProcessConf
 	if restorePid != 0 {
 		// Write config.json and hostconfig.json files
 		// to /var/lib/docker/containers/<ID>.
-		if err := m.container.ToDisk(); err != nil {
-			log.Debugf("%s", err)
+		if err := m.container.toDiskLocking(); err != nil {
+			logrus.Errorf("Error saving container to disk: %s", err)
 		}
 	}
+
+	return nil
 }
 
 // resetContainer resets the container's IO and ensures that the command is able to be executed again
