@@ -79,6 +79,8 @@ func (daemon *Daemon) containerRestore(container *Container, opts *runconfig.Cri
 		}
 	}()
 
+	container.BeingRestored = true
+
 	if err := daemon.conditionalMountOnStart(container); err != nil {
 		return err
 	}

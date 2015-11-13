@@ -21,6 +21,7 @@ type State struct {
 	Paused            bool
 	Restarting        bool
 	Checkpointed      bool
+	BeingRestored     bool
 	OOMKilled         bool
 	removalInProgress bool // Not need for this to be persistent on disk.
 	Dead              bool
@@ -161,6 +162,12 @@ func (s *State) WaitStop(timeout time.Duration) (int, error) {
 	s.Unlock()
 	if err := wait(waitChan, timeout); err != nil {
 		return -1, err
+	}
+	//if container has been checkpointed, give a second chance to wait
+	if s.BeingRestored {
+		if err := wait(s.waitChan, timeout); err != nil {
+			return -1, err
+		}
 	}
 	return s.getExitCode(), nil
 }

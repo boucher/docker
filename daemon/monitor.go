@@ -135,7 +135,9 @@ func (m *containerMonitor) Start() error {
 
 // Restore restores the containers from an image and monitors it according to the restart policy
 func (m *containerMonitor) Restore(restoreOpts *runconfig.CriuConfig, forceRestore bool) error {
-	return m.start(restoreOpts, forceRestore)
+	err := m.start(restoreOpts, forceRestore)
+	m.container.BeingRestored = false
+	return err
 }
 
 // Internal method to start or restore the containers and monitors it
