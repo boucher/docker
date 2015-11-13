@@ -162,6 +162,12 @@ func (s *State) WaitStop(timeout time.Duration) (int, error) {
 	if err := wait(waitChan, timeout); err != nil {
 		return -1, err
 	}
+	//if container has been checkpointed, give a second chance to wait
+	if s.HasBeenCheckpointed() {
+		if err := wait(s.waitChan, timeout); err != nil {
+			return -1, err
+		}
+	}
 	return s.getExitCode(), nil
 }
 
