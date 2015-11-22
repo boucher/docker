@@ -108,6 +108,10 @@ func (daemon *Daemon) containerRestore(container *Container, opts *runconfig.Cri
 		}
 	}
 
+	if err := daemon.createRootfs(container); err != nil {
+		return err
+	}
+
 	mounts, err := daemon.setupMounts(container)
 	if err != nil {
 		return err

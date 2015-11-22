@@ -615,8 +615,9 @@ func (daemon *Daemon) newBaseContainer(id string) *Container {
 			root:         daemon.containerRoot(id),
 			MountPoints:  make(map[string]*volume.MountPoint),
 		},
-		Volumes:   make(map[string]string),
-		VolumesRW: make(map[string]bool),
+		Volumes:        make(map[string]string),
+		VolumesRW:      make(map[string]bool),
+		CriuimagePaths: make(map[string]string),
 	}
 }
 

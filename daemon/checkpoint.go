@@ -42,6 +42,21 @@ func (daemon *Daemon) ContainerCheckpoint(name string, opts *runconfig.CriuConfi
 		daemon.Cleanup(container)
 	}
 
+	// commit the filesystem as well, support AUFS only
+	commitCfg := &ContainerCommitConfig{
+		Pause:  true,
+		Config: container.Config,
+	}
+	img, err := daemon.Commit(name, commitCfg)
+	if err != nil {
+		return err
+	}
+	// Update the criu image path and image ID of the container
+	criuImagePath := opts.ImagesDirectory
+	container.CriuimagePaths[criuImagePath] = img.ID
+	// Update image layer of the committed container
+	container.ImageID = img.ID
+
 	if err := container.toDisk(); err != nil {
 		return fmt.Errorf("Cannot update config for container: %s", err)
 	}
