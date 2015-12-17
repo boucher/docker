@@ -58,12 +58,16 @@ func (daemon *Daemon) containerInspectCurrent(name string, size bool) (*types.Co
 		Networks:               container.NetworkSettings.Networks,
 	}
 
-	return &types.ContainerJSON{
+	containerJSON := &types.ContainerJSON{
 		ContainerJSONBase: base,
 		Mounts:            mountPoints,
 		Config:            container.Config,
 		NetworkSettings:   networkSettings,
-	}, nil
+	}
+
+	addExperimentalFields(container, containerJSON)
+
+	return containerJSON, nil
 }
 
 // containerInspect120 serializes the master version of a container into a json type.
@@ -119,19 +123,17 @@ func (daemon *Daemon) getInspectData(container *container.Container, size bool) 
 	}
 
 	containerState := &types.ContainerState{
-		Status:         container.State.StateString(),
-		Running:        container.State.Running,
-		Paused:         container.State.Paused,
-		Checkpointed:   container.State.Checkpointed,
-		Restarting:     container.State.Restarting,
-		OOMKilled:      container.State.OOMKilled,
-		Dead:           container.State.Dead,
-		Pid:            container.State.Pid,
-		ExitCode:       container.State.ExitCode,
-		Error:          container.State.Error,
-		StartedAt:      container.State.StartedAt.Format(time.RFC3339Nano),
-		FinishedAt:     container.State.FinishedAt.Format(time.RFC3339Nano),
-		CheckpointedAt: container.State.CheckpointedAt.Format(time.RFC3339Nano),
+		Status:     container.State.StateString(),
+		Running:    container.State.Running,
+		Paused:     container.State.Paused,
+		Restarting: container.State.Restarting,
+		OOMKilled:  container.State.OOMKilled,
+		Dead:       container.State.Dead,
+		Pid:        container.State.Pid,
+		ExitCode:   container.State.ExitCode,
+		Error:      container.State.Error,
+		StartedAt:  container.State.StartedAt.Format(time.RFC3339Nano),
+		FinishedAt: container.State.FinishedAt.Format(time.RFC3339Nano),
 	}
 
 	contJSONBase := &types.ContainerJSONBase{

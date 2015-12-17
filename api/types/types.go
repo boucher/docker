@@ -252,7 +252,7 @@ type ContainerState struct {
 	Status         string
 	Running        bool
 	Paused         bool
-	Checkpointed   bool
+	Checkpointed   bool `json:",omitempty"`
 	Restarting     bool
 	OOMKilled      bool
 	Dead           bool
@@ -261,7 +261,7 @@ type ContainerState struct {
 	Error          string
 	StartedAt      string
 	FinishedAt     string
-	CheckpointedAt string `json:"-"`
+	CheckpointedAt string `json:",omitempty"`
 }
 
 // ContainerJSONBase contains response of Remote API:
