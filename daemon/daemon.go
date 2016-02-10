@@ -1028,6 +1028,9 @@ func (daemon *Daemon) Checkpoint(c *container.Container, opts *types.CriuConfig)
 func (daemon *Daemon) Restore(c *container.Container, pipes *execdriver.Pipes, restoreCallback execdriver.DriverCallback, opts *types.CriuConfig, forceRestore bool) (execdriver.ExitStatus, error) {
 	hooks := execdriver.Hooks{
 		Restore: restoreCallback,
+		PostRestore: func(processConfig *execdriver.ProcessConfig, pid int, chOOM <-chan struct{}) error {
+			return daemon.setNetworkNamespaceKey(c.ID, pid)
+		},
 	}
 
 	exitCode, err := daemon.execDriver.Restore(c.Command, pipes, hooks, opts, forceRestore)
