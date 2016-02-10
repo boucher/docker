@@ -103,6 +103,18 @@ func LinkSetName(link Link, name string) error {
 	req.AddData(data)
 
 	_, err := req.Execute(syscall.NETLINK_ROUTE, 0)
+	if err != nil && os.IsExist(err) && name == "eth0" {
+		// XXX Temporary hack.
+		//     If we are called after a container has been restored,
+		//     we need to delete eth0 and try again.
+		//     The right solution is to tell CRIU not create network
+		//     devices.
+		l := &Device{LinkAttrs: LinkAttrs{Name: name}}
+		if e := LinkDel(l); e != nil {
+			return e
+		}
+		_, err = req.Execute(syscall.NETLINK_ROUTE, 0)
+	}
 	return err
 }
 

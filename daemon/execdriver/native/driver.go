@@ -393,7 +393,20 @@ func (d *Driver) Restore(c *execdriver.Command, pipes *execdriver.Pipes, hooks e
 		return execdriver.ExitStatus{ExitCode: -1}, err
 	}
 
+	if err := d.createNetwork(&config, c, hooks); err != nil {
+		return execdriver.ExitStatus{ExitCode: -1}, err
+	}
+
 	oom := notifyOnOOM(cont)
+	if hooks.PostRestore != nil {
+		pid, err := p.Pid()
+		if err != nil {
+			p.Signal(os.Kill)
+			p.Wait()
+			return execdriver.ExitStatus{ExitCode: -1}, err
+		}
+		hooks.PostRestore(&c.ProcessConfig, pid, oom)
+	}
 	if hooks.Restore != nil {
 		pid, err := p.Pid()
 		if err != nil {

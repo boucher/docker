@@ -40,6 +40,7 @@ type Hooks struct {
 	PostStop []DriverCallback
 	// Restore is called after the container is restored
 	Restore DriverCallback
+	PostRestore DriverCallback
 }
 
 // Info is driver specific information based on
